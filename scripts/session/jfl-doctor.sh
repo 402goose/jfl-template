@@ -402,6 +402,68 @@ check_memory() {
     fi
 }
 
+# Check: Unmerged session branches and conflicts
+check_unmerged_sessions() {
+    local unmerged=0
+    local conflicts=0
+    local merged=0
+
+    # Check for .merge-conflict files in worktrees
+    for worktree in "$WORKTREES_DIR"/session-*; do
+        if [[ -d "$worktree" ]]; then
+            local session_name=$(basename "$worktree")
+
+            # Check for conflict marker
+            if [[ -f "$worktree/.merge-conflict" ]]; then
+                conflicts=$((conflicts + 1))
+
+                if $FIX_MODE; then
+                    # Try to resolve by running auto-merge with new auto-resolve logic
+                    rm -f "$worktree/.merge-conflict"
+                    if "$SCRIPT_DIR/auto-merge.sh" once "$session_name" 2>/dev/null; then
+                        merged=$((merged + 1))
+                        FIXED=$((FIXED + 1))
+                    else
+                        # Still can't merge - recreate conflict marker will happen in auto-merge
+                        conflicts=$((conflicts + 1))
+                    fi
+                fi
+            fi
+
+            # Check for unmerged commits (session ahead of main)
+            local commits_ahead=$(git rev-list --count main.."$session_name" 2>/dev/null || echo "0")
+            if [[ "$commits_ahead" -gt 0 ]]; then
+                unmerged=$((unmerged + 1))
+
+                if $FIX_MODE && [[ ! -f "$worktree/.merge-conflict" ]]; then
+                    # Try to merge
+                    if "$SCRIPT_DIR/auto-merge.sh" once "$session_name" 2>/dev/null; then
+                        merged=$((merged + 1))
+                        FIXED=$((FIXED + 1))
+                        unmerged=$((unmerged - 1))
+                    fi
+                fi
+            fi
+        fi
+    done
+
+    if [[ $conflicts -gt 0 ]]; then
+        if $FIX_MODE && [[ $merged -gt 0 ]]; then
+            report "merge" "ok" "resolved $merged conflicts, $conflicts remaining"
+        else
+            report "merge" "error" "$conflicts unresolved merge conflicts"
+        fi
+    elif [[ $unmerged -gt 0 ]]; then
+        if $FIX_MODE; then
+            report "merge" "ok" "merged $merged sessions, $unmerged remaining"
+        else
+            report "merge" "warning" "$unmerged sessions with unmerged commits"
+        fi
+    else
+        report "merge" "ok" "all sessions merged"
+    fi
+}
+
 # Check: Session state files
 check_session_state() {
     mkdir -p "$SESSIONS_DIR"
@@ -447,6 +509,7 @@ main() {
     check_stale_sessions
     check_orphaned_worktrees
     check_orphaned_branches
+    check_unmerged_sessions
     check_locks
     check_memory
     check_session_state
