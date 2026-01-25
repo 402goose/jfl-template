@@ -19,279 +19,444 @@ Don't make users fill out forms before they can build. Let them start immediatel
 
 ---
 
-## CRITICAL: Worktree Session Isolation
+## CRITICAL: Session Sync (MUST READ)
 
-**Multi-session safety requires worktrees. This is non-negotiable.**
+**Context loss is unacceptable.** Before starting ANY work, verify repos are synced.
 
-When SessionStart hook runs, it creates an isolated worktree for this session. You will see:
-```
-═══════════════════════════════════════════════════════════
-  CLAUDE: You MUST run: cd /path/to/worktrees/session-xxx
-═══════════════════════════════════════════════════════════
-```
+### At Session Start - ALWAYS Do (BEFORE RESPONDING TO USER):
 
-### YOU MUST CD TO THAT PATH IMMEDIATELY
+**Complete ALL steps before saying anything to the user.**
 
-If you don't cd to the worktree:
-- You'll work directly on `main` branch
-- Multiple sessions will clobber each other
-- Team members will overwrite each other's work
-- **This breaks everything**
+**1. CD to worktree** (from hook output)
 
-### At Session Start
-
-1. **See the cd instruction** in hook output
-2. **Run the cd command** exactly as shown
-3. **Verify** you're in the worktree:
-   ```bash
-   pwd && git branch --show-current
-   ```
-   Should show `worktrees/session-*` path and `session-*` branch, NOT `main`
-
-### If You Missed the Output
-
+**2. Run session sync:**
 ```bash
-# Find the worktree path
+./product/scripts/session/session-sync.sh
+```
+
+**3. Run doctor check:**
+```bash
+./product/scripts/session/jfl-doctor.sh
+```
+Note any warnings (orphaned worktrees, unmerged sessions, memory not initialized).
+
+**4. Get unified context via MCP (REQUIRED):**
+```
+Call: mcp__jfl-context__context_get
+```
+
+This single call returns:
+- Recent journal entries (what happened across sessions)
+- Knowledge docs (vision, roadmap, narrative, thesis)
+- Code file headers (@purpose tags)
+
+**DO NOT read individual markdown files.** The context MCP tool aggregates everything. This is why we built Context Hub.
+
+**5. Show recent journal entries:**
+```bash
+cat .jfl/journal/*.jsonl 2>/dev/null | tail -10
+```
+
+**6. Run /hud to show project dashboard:**
+```
+Invoke: /hud skill
+```
+
+This displays the full status, pipeline, tasks, and guides next action.
+
+**ONLY AFTER completing all 6 steps**, respond to the user with the HUD output.
+
+If you need to search for something specific later:
+```
+Call: mcp__jfl-context__context_search with query="your search"
+```
+
+### CRITICAL: CD to Worktree
+
+**After SessionStart hook runs, you MUST cd to the worktree.**
+
+The hook creates a worktree and outputs:
+```
+═══════════════════════════════════════════════════════════
+  CLAUDE: You MUST run: cd /path/to/worktree
+═══════════════════════════════════════════════════════════
+```
+
+**YOU MUST RUN THAT CD COMMAND.** If you don't, you'll work on main branch and break multi-session isolation.
+
+If you missed the output, find the path:
+```bash
 cat .jfl/current-worktree.txt
+```
 
-# CD to it
+Then cd to it:
+```bash
 cd $(cat .jfl/current-worktree.txt)
+```
 
-# Verify
+**Verify you're in the worktree:**
+```bash
 pwd && git branch --show-current
 ```
 
-### Why This Matters
-
-Each session gets its own branch (`session-user-date-id`). Changes auto-merge to main periodically. On session end, everything merges cleanly. Without this:
-- Session A edits file X
-- Session B edits file X
-- Both think they're on main
-- Chaos ensues
-
-**Do not skip this step. Ever.**
+Should show `/path/worktrees/session-*` and branch `session-*`, NOT `main`.
 
 ---
 
-## CRITICAL: Journal Protocol
+This syncs:
+- jfl-gtm (this repo)
+- jfl-platform (product symlink target)
+- All submodules
 
-**Write the journal as you go. Don't wait for session end.**
+### Why This Matters
 
-The journal (`.jfl/journal/<session-id>.jsonl`) is the structured record of what's happening. Sessions crash, windows close, context resets — the journal survives.
+The `product/` directory is a **symlink** to `../jfl-platform`. If jfl-platform gets out of sync with GitHub:
+- Files appear "deleted" when they exist on GitHub
+- Work done in previous sessions is invisible
+- User loses trust in the system
 
-### When to Write
+**This has happened multiple times. Do not skip the sync.**
 
-Append a journal entry when ANY of these happen:
-- **Decision made** (even small ones)
-- **Knowledge doc updated** (BRAND_DECISIONS, SPEC, ROADMAP, etc.)
-- **Something learned** (especially from errors/debugging)
-- **Major feature completed**
-- **External conversation** (CRM contact, investor, customer)
+### Verify Context is Intact
 
-**Don't ask permission. Don't batch. Write immediately.**
+```bash
+./product/scripts/session/test-context-preservation.sh
+```
 
-### Entry Format (JSONL)
+This checks:
+- Critical knowledge files exist (VISION.md, BRAND_DECISIONS.md, etc.)
+- Product specs exist (PLATFORM_SPEC.md, TEMPLATE_SPEC.md, CONTEXT_GRAPH_SPEC.md)
+- Git repos are in sync with remotes
+- No uncommitted changes in knowledge/
 
-Each entry is a single JSON object on one line in `.jfl/journal/<session-id>.jsonl`:
+**If tests fail, do not proceed until fixed.**
+
+### Auto-Push on Session End
+
+Hooks in `.claude/settings.json` automatically:
+- Commit changes on Stop/PreCompact
+- Push to origin
+
+### Continuous Auto-Commit (RECOMMENDED)
+
+**Problem:** Stop/PreCompact hooks only run if session ends cleanly. If session crashes, terminal closes, or you switch away → files can be lost.
+
+**Solution:** Run continuous auto-commit in background:
+
+```bash
+# In a separate terminal, run:
+./product/scripts/session/auto-commit.sh start
+
+# Or with custom interval (default 120s):
+./product/scripts/session/auto-commit.sh start 60
+```
+
+This commits every 2 minutes to:
+- knowledge/
+- previews/
+- content/
+- suggestions/
+- CLAUDE.md
+- .jfl/
+
+**Start this at every session.** It's the only way to guarantee no work is lost.
+
+---
+
+## CRITICAL: Journal Protocol (NON-NEGOTIABLE)
+
+**⚠️ THIS IS MANDATORY. NOT OPTIONAL. NOT SKIPPABLE.**
+
+You MUST write journal entries. The Stop hook will block session end if no journal entry exists.
+
+**Write DETAILED journal entries as you work. Not titles — actual content.**
+
+The journal is the handoff document between sessions and between people. When someone asks "what did Hath work on?", the journal should answer with specifics, not vague titles.
+
+### Enforcement
+
+Hooks enforce this automatically:
+- **Stop hook** → Blocks session end if no journal entry for this session
+- **PreCompact hook** → Checks for journal entry before context compaction
+- **PostToolUse (Write/Edit)** → Checks for @purpose header on code files
+
+If you see "STOP - JOURNAL ENTRY REQUIRED", you MUST write a journal entry before proceeding.
+
+### The Problem We're Solving
+
+BAD entry (useless):
+```json
+{"title": "Session management improvements", "summary": "Applied Takopi patterns"}
+```
+
+GOOD entry (useful):
+```json
+{
+  "title": "Session management with runner infrastructure",
+  "summary": "Built database tables, service layer, and API for managing AI sessions",
+  "detail": "Created runner_sessions, session_events, session_costs tables. RunnerService class with create/suspend/resume/destroy methods. /api/sessions endpoints for CRUD. Dashboard UI with polling. Note: simulateAgentStartup() is a stub - needs real Claude integration.",
+  "files": ["product/src/lib/db/schema.ts", "product/src/lib/runner-service.ts", "product/src/app/api/sessions/route.ts"],
+  "incomplete": ["simulateAgentStartup is stubbed", "cost tracking not connected to Stripe"],
+  "next": "Connect to Claude API for real agent execution"
+}
+```
+
+### Per-Session Journal Files
+
+Each session writes to its own file to avoid merge conflicts:
+```
+.jfl/journal/<session-id>.jsonl
+```
+
+The session ID comes from your git branch name (e.g., `session-goose-20260125-0240-bea0be`).
+
+### When to Write (MANDATORY TRIGGERS)
+
+Write a journal entry IMMEDIATELY when ANY of these happen:
+
+| Event | Type | You MUST capture |
+|-------|------|------------------|
+| **Feature completed** | `feature` | What was built, files created, what's stubbed, next steps |
+| **Decision made** | `decision` | Options considered, why this choice, decision slug |
+| **Bug fixed** | `fix` | Root cause, the fix, what you learned |
+| **Something learned** | `discovery` | The insight, how it changes approach |
+| **Milestone reached** | `milestone` | Everything in this milestone, incomplete items |
+| **Session ending** | `session-end` | Summary of session, handoff for next person |
+
+**Do not wait until session end to write entries.** Write them AS events happen. Multiple entries per session is normal and expected.
+
+### Real-Time Capture Triggers (ENFORCE THESE)
+
+**After you do ANY of these, IMMEDIATELY write a journal entry:**
+
+1. **After git commit** → Journal entry describing what was committed
+2. **After TaskUpdate to completed** → Journal entry for that task
+3. **After user says "done", "looks good", "ship it", "approved"** → Journal entry capturing what was approved
+4. **After making a choice between options** → Decision journal entry
+5. **After fixing an error/bug** → Fix journal entry with root cause
+6. **After writing a new file** → Journal entry if it's significant (not just a small helper)
+7. **After completing a multi-step task** → Feature/milestone journal entry
+
+**Pattern to follow:**
+```
+1. Do the work
+2. Commit (if code)
+3. Write journal entry ← DON'T SKIP THIS
+4. Continue to next task
+```
+
+**If you catch yourself about to move to the next task without journaling, STOP and write the entry first.**
+
+The session-end hook is a BACKSTOP, not the primary enforcement. Real-time capture is mandatory.
+
+### Entry Format
 
 ```json
 {
   "v": 1,
   "ts": "2026-01-25T10:30:00.000Z",
   "session": "session-goose-20260125-xxxx",
-  "type": "feature|fix|decision|milestone|discovery",
+  "type": "feature|fix|decision|milestone|spec|discovery",
   "status": "complete|incomplete|blocked",
-  "title": "Short but descriptive title",
-  "summary": "2-3 sentence summary of what happened",
-  "detail": "Full description. What was built? Files? Stubs? Next steps?",
+  "title": "Short title (but not TOO short)",
+  "summary": "2-3 sentence summary of what this actually is",
+  "detail": "Full description. What was built? What files? What's stubbed? What's next?",
   "files": ["file1.ts", "file2.ts"],
-  "decision": "decision-slug",
-  "next": "what should happen next"
+  "decision": "decision-slug-for-linking",
+  "incomplete": ["list of things not finished"],
+  "next": "what should happen next",
+  "learned": ["key learnings from this work"]
 }
 ```
 
-**Required fields:** `v`, `ts`, `session`, `type`, `title`, `summary`
-**Recommended:** `detail`, `files`, `next`
+**Required fields:** v, ts, session, type, title, summary
+**Strongly recommended:** detail, files
 
 ### How to Write Entries
 
+**Direct file append** (no CLI dependency):
+
 ```bash
-# Get session ID from branch
+# Get session and file path
 SESSION=$(git branch --show-current)
-JOURNAL=".jfl/journal/${SESSION}.jsonl"
+JOURNAL_FILE=".jfl/journal/${SESSION}.jsonl"
 mkdir -p .jfl/journal
 
-# Append entry (single line JSON)
-echo '{"v":1,"ts":"...","session":"...","type":"feature","title":"...","summary":"..."}' >> "$JOURNAL"
+# Append entry
+cat >> "$JOURNAL_FILE" << 'ENTRY'
+{"v":1,"ts":"2026-01-25T10:30:00.000Z","session":"SESSION_ID","type":"feature","status":"complete","title":"...","summary":"...","detail":"...","files":["..."]}
+ENTRY
 ```
 
-Or use the Write tool to append directly.
+Or just use the **Write tool** to append to the file directly. The format is one JSON object per line.
+
+### What Makes a GOOD Entry
+
+1. **Someone reading it can understand what exists** — not just that you worked on something
+2. **Files are listed** — so they can find the code
+3. **Incomplete items are noted** — so they know what's stubbed
+4. **Next steps are clear** — so they can continue
+
+### File Headers (MANDATORY FOR CODE FILES)
+
+Every `.ts`, `.tsx`, `.js`, `.jsx` file MUST have a header with at minimum `@purpose`:
+
+```typescript
+/**
+ * Component/Module Name
+ *
+ * Brief description of what this does.
+ *
+ * @purpose One-line description of file's purpose
+ * @spec Optional: link to spec (e.g., PLATFORM_SPEC.md#sessions)
+ * @decision Optional: decision slug (e.g., journal/2026-01.md#per-session)
+ */
+```
+
+The PostToolUse hook will warn you if you write/edit a code file without `@purpose`. Add it immediately.
+
+This enables:
+- Synopsis to extract context from files
+- Codebase understanding without reading full files
+- Decision traceability
 
 ### Reading the Journal
 
-Use the synopsis command for human-readable summaries:
+All session files are in `.jfl/journal/`. To see recent entries across all sessions:
 ```bash
-node product/packages/memory/dist/cli.js synopsis 24        # Last 24 hours
-node product/packages/memory/dist/cli.js synopsis 8 hath    # What did Hath do?
+cat .jfl/journal/*.jsonl | sort -t'"' -k4 | tail -20
 ```
 
-**Triggerable anytime.** User can say "journal this" or "write that down" and you should add an entry.
+Or read a specific session's journal:
+```bash
+cat .jfl/journal/session-goose-20260125-xxxx.jsonl
+```
+
+### Integration with Memory System
+
+The memory pipeline indexes `.jfl/journal/` automatically. Entries become searchable via:
+- Memory semantic search
+- PageIndex tree queries ("when did we decide X?")
+- HUD recent work display
+
+---
+
+## CRITICAL: Synopsis Command (What Happened?)
+
+**When anyone asks "what happened?" or "what did X work on?" — use the synopsis command.**
+
+This is the STANDARDIZED way to get work summaries. Don't manually string together git log, journal files, etc. Use this:
+
+```bash
+# From project root:
+cd product/packages/memory && node dist/journal/cli.js synopsis [hours] [author]
+
+# Examples:
+node dist/journal/cli.js synopsis 24           # Last 24 hours, all team
+node dist/journal/cli.js synopsis 8            # Last 8 hours
+node dist/journal/cli.js synopsis 24 hathbanger # What did hath do in 24 hours
+node dist/journal/cli.js synopsis --author "Andrew" # Filter by git author name
+```
+
+### What It Returns
+
+The synopsis aggregates:
+1. **Journal entries** from all sessions/worktrees
+2. **Git commits** from all branches
+3. **File headers** (@purpose, @spec, @decision tags)
+4. **Time audit** with category breakdown and multipliers
+
+Output includes:
+- Summary of work done (features, fixes, decisions)
+- Time audit breakdown (infra vs features vs docs vs content)
+- Per-team-member contribution
+- Health checks (too much infra? not enough outreach?)
+- Next steps from journal entries
+- Incomplete/stubbed items
+
+### When to Use
+
+| Question | Command |
+|----------|---------|
+| "What happened today?" | `synopsis 24` |
+| "What did Hath work on?" | `synopsis 48 hathbanger` |
+| "What happened this week?" | `synopsis 168` |
+| "Give me a status update" | `synopsis 24 --verbose` |
+
+**IMPORTANT:** Every AI should use this exact command. Do NOT try to manually piece together journal + commits + headers yourself. The synopsis command does it correctly every time.
 
 ---
 
 ## CRITICAL: Immediate Decision Capture
 
-**When a decision is made, update the relevant doc IMMEDIATELY.**
-
-Don't ask "should I update the doc?" Don't say "I'll update that later." Just do it.
+**When a decision is made, update the relevant doc AND journal IMMEDIATELY.**
 
 ### Flow
 
 1. Decision made in conversation
-2. Identify the relevant doc:
+2. Update the relevant doc:
    - Naming/brand → `knowledge/BRAND_DECISIONS.md`
-   - Product direction → `product/SPEC.md` or relevant spec
-   - Roadmap/timeline → `knowledge/ROADMAP.md`
+   - Product direction → `product/SPEC.md`
    - Architecture → relevant `*_SPEC.md`
-3. Update the doc immediately (use Edit tool)
-4. Add journal entry
-5. Continue conversation
+3. Write journal entry with full context (options considered, why this choice)
+4. Continue conversation
 
 ### Example
 
 ```
 User: "Let's go with Option A for the pricing"
 
-Claude: *updates knowledge/PRICING.md*
-        *adds journal entry*
-        "Done — updated PRICING.md with Option A.
-         Ready to implement or want to discuss the tiers?"
+Claude: *updates knowledge/PRICING.md with Option A details*
+        *appends to .jfl/journal/<session>.jsonl:*
+        {
+          "type": "decision",
+          "title": "Pricing model: Option A (usage-based)",
+          "summary": "Chose usage-based pricing over flat rate",
+          "detail": "Options considered: A) $5/day usage-based, B) $49/mo flat, C) freemium. Chose A because: aligns with x402 micropayments, lower barrier to start, scales with value delivered. Rejected B because fixed cost feels like commitment before value proven.",
+          "decision": "pricing-model",
+          "files": ["knowledge/PRICING.md"]
+        }
+
+        "Done — updated PRICING.md. Ready to implement?"
 ```
 
-### Why This Matters
+### Why Detail Matters
 
-- Decisions get lost in chat history
-- Docs become stale if we wait
-- Future sessions need current state
-- The journal tracks the narrative, docs track current truth
+- Next session, someone asks "why usage-based?" → journal has the answer
+- You can trace back through decision history
+- Avoids re-debating settled decisions
 
 ---
 
-## Session Management
+## CRITICAL: CRM is Google Sheets (NOT a markdown file)
 
-**Context loss is unacceptable.** The session hooks handle sync automatically.
+**NEVER read a CRM.md file. It doesn't exist. The CRM is Google Sheets accessed via CLI.**
 
-### What Happens on Session Start
-
-The `SessionStart` hook in `.claude/settings.json` automatically:
-1. Creates an isolated worktree for this session
-2. Syncs repos in the background (git pull, submodule updates)
-3. Starts auto-commit (every 2 minutes)
-4. Starts auto-merge to main (every 15 minutes)
-
-**You don't need to run sync manually.** The hooks handle it.
-
-### If Something Looks Wrong
-
-If files appear missing or out of sync:
-```bash
-# Check sync status
-git status
-git submodule status
-
-# Manual sync if needed
-./product/scripts/session/session-sync.sh
-```
-
-### Auto-Save
-
-The session hooks automatically:
-- **Auto-commit**: Every 2 minutes (in worktree)
-- **Auto-merge**: Every 15 minutes (worktree → main)
-- **On Stop/PreCompact**: Final commit and push
-
-You don't need to manage commits manually. Work is continuously saved.
-
----
-
-## CRM Configuration
-
-**CRM is config-driven.** The `./crm` CLI reads from `.jfl/config.json` and routes to the appropriate backend.
-
-### Supported Backends
-
-| Type | Description | Best For |
-|------|-------------|----------|
-| `google-sheets` | Google Sheets via googleapis | Teams, real-time sync |
-| `airtable` | Airtable via API | Rich field types, views |
-| `markdown` | knowledge/CRM.md file | Solo, no external deps |
-
-### Setup
-
-Run the setup wizard:
-```bash
-./crm setup
-```
-
-This will:
-1. Ask which backend you want
-2. Collect required credentials/IDs
-3. Save config to `.jfl/config.json`
-
-### Config Structure
-
-```json
-// .jfl/config.json
-{
-  "crm": {
-    "type": "google-sheets",
-    "config": {
-      "sheet_id": "your-sheet-id"
-    }
-  }
-}
-```
-
-For Airtable:
-```json
-{
-  "crm": {
-    "type": "airtable",
-    "config": {
-      "base_id": "your-base-id",
-      "api_key_env": "AIRTABLE_API_KEY"
-    }
-  }
-}
-```
-
-For markdown:
-```json
-{
-  "crm": {
-    "type": "markdown",
-    "config": {
-      "path": "knowledge/CRM.md"
-    }
-  }
-}
-```
-
-### Environment Variable Fallback
-
-If CRM type is not configured but `CRM_SHEET_ID` env var is set, the CLI automatically uses Google Sheets.
-
-### Commands
+### CRM Commands
 
 ```bash
-./crm                    # Dashboard (if supported by backend)
-./crm list               # List deals/contacts
-./crm prep <name>        # Prep for a call (full context)
-./crm touch <name>       # Log activity
-./crm setup              # Run setup wizard
+./crm                     # Dashboard with insights
+./crm list                # List all deals
+./crm prep <name>         # Full context for a contact (use before calls)
+./crm stale               # Deals with no activity in 5+ days
+./crm priority            # High priority deals
+./crm touch <name>        # Log an activity
+./crm update <name> <field> <value>  # Update a field
+./crm add contact "Name" "Company"   # Add new contact
+./crm add deal "Name" "Contact" "Pipeline"  # Add deal
 ```
 
-Available commands depend on your CRM backend.
+### When to Use
+
+- **Before any outreach:** `./crm prep [name]` to get full context
+- **After a call/meeting:** `./crm touch [name]` to log it
+- **Checking pipeline:** `./crm list` or `./crm stale`
+- **HUD pulls from CRM:** The `/hud` skill uses `./crm list` to show pipeline
+
+**DO NOT:**
+- Read `knowledge/CRM.md` (it doesn't exist)
+- Try to grep for CRM data in markdown files
+- Store contact info in suggestions files
 
 ---
 
@@ -439,7 +604,7 @@ git remote -v             # What repo is this?
 | Marketing content | `content/` in this repo |
 | Brand/design work | `knowledge/BRAND*.md`, `previews/` |
 | Strategic docs | `knowledge/` in this repo |
-| CRM/outreach | `knowledge/CRM.md`, `suggestions/` |
+| CRM/outreach | `./crm` CLI (Google Sheets), `suggestions/` |
 
 ### 4. Store the setup in config
 
@@ -926,176 +1091,6 @@ This uses their local `gh` CLI - no platform account needed.
 
 ---
 
-## When to Start Charging
-
-**Free to start. Pay when you get value.**
-
-JFL is free while you're getting set up. You pay when:
-1. **You complete foundation + brand** (you've gotten real value)
-2. **You add a teammate** (collaboration costs money)
-
-### PAYMENT IS A HARD GATE
-
-**Before adding a teammate or continuing after value delivered, present options nicely and offer to launch the wizard:**
-
-**For adding teammates:**
-```
-┌─────────────────────────────────────────────────────┐
-│  Adding a teammate                                  │
-├─────────────────────────────────────────────────────┤
-│                                                     │
-│  Day Pass        $5/day per person                  │
-│  ├─ Only pay the days you use it                    │
-│  ├─ AI included (no API key needed)                 │
-│  ├─ Chat in Telegram, Slack, Discord                │
-│  ├─ Dashboard + Deploy                              │
-│  └─ Pay with crypto (x402)                          │
-│                                                     │
-│  Solo            $49/mo                             │
-│  ├─ Just you                                        │
-│  ├─ AI included (no API key needed)                 │
-│  ├─ Chat in Telegram, Slack, Discord                │
-│  ├─ Dashboard + Deploy                              │
-│  └─ Best if you use it most days                    │
-│                                                     │
-│  Team            $199/mo                            │
-│  ├─ Up to 5 people (+$25/seat after)                │
-│  ├─ AI included for everyone                        │
-│  ├─ Everything in Solo, plus:                       │
-│  ├─ Team dashboard + analytics                      │
-│  └─ Parallel agents                                 │
-│                                                     │
-└─────────────────────────────────────────────────────┘
-
-Want me to start the setup? I'll run jfl login for you.
-```
-
-If they say yes, run: `jfl login`
-
-**For foundation + brand complete:**
-```
-┌─────────────────────────────────────────────────────┐
-│  Nice work! Foundation + brand done.                │
-├─────────────────────────────────────────────────────┤
-│                                                     │
-│  JFL is $5/day to continue building.                │
-│                                                     │
-│  Options:                                           │
-│                                                     │
-│  Day Pass        $5/day                             │
-│  └─ Only pay the days you use it                    │
-│                                                     │
-│  Solo            $49/mo                             │
-│  └─ Fixed price, unlimited days                     │
-│                                                     │
-└─────────────────────────────────────────────────────┘
-
-Ready to continue? I'll set up billing real quick.
-```
-
-Then run: `jfl login`
-
-**Do NOT proceed until payment is set up.**
-- For teammates: Don't create suggestions file or add collaborator until `jfl login` completes
-- For continuing: Don't build more until `jfl login` completes
-
-### Detecting Value Delivered
-
-Check if they've completed the foundation:
-```
-knowledge/VISION.md      - filled (not template)
-knowledge/ROADMAP.md     - has dates
-knowledge/NARRATIVE.md   - has messaging
-knowledge/THESIS.md      - has why you'll win
-```
-
-Check if brand work is done:
-```
-knowledge/BRAND_DECISIONS.md - has choices
-previews/brand/              - has generated assets
-```
-
-**When foundation + brand are complete:**
-```
-Nice work - you've got your foundation and brand locked in.
-
-JFL is $5/day per person to keep using. You can:
-- Pay with x402 wallet (only pay the days you use it)
-- Subscribe ($49/mo solo, $199/mo team)
-
-Run: jfl login
-```
-
-**When they add a teammate:**
-```
-Adding teammates costs $5/day per person.
-
-Options:
-- x402 wallet: $5/day each, pay only when active
-- Solo ($49/mo): Just you
-- Pro ($199/mo): Up to 5 people (+$25/seat after)
-
-Run: jfl login
-```
-
-### Pricing Tiers
-
-```
-Trial ($0)
-├─ Full JFL toolkit
-├─ Foundation setup (VISION, ROADMAP, etc.)
-├─ Brand creation
-├─ Bring your own AI key
-└─ Ends when you get value or add teammates
-
-Day Pass ($5/day per person)
-├─ Only pay the days you use it
-├─ AI included (no API key needed)
-├─ Chat in Telegram, Slack, Discord
-├─ Dashboard + Deploy at jfl.run
-├─ Pay with crypto (x402)
-└─ $0 on days you don't use it
-
-Solo ($49/mo)
-├─ Just you (1 seat)
-├─ AI included (no API key needed)
-├─ Chat in Telegram, Slack, Discord
-├─ Dashboard + Deploy
-└─ Best if you use it most days
-
-Team ($199/mo)
-├─ Up to 5 seats (+$25/seat after)
-├─ AI included for everyone
-├─ Everything in Solo, plus:
-├─ Team dashboard + analytics
-├─ Parallel agents
-└─ Priority support
-```
-
-### How to Guide Them
-
-After foundation + brand complete:
-```
-You've built something real. JFL is $5/day to continue.
-
-jfl login    # Set up payment
-```
-
-When adding teammate:
-```
-Teammates are $5/day each (or Pro for $199/mo up to 5).
-
-jfl login    # Set up team billing
-```
-
-**After they login:**
-- `jfl deploy` deploys to jfl.run
-- `jfl agents` manages parallel workers
-- Dashboard at jfl.run/dashboard
-- Chat in Telegram, Slack, Discord
-
----
-
 ## Session Feedback
 
 Every few sessions (or at natural breakpoints), ask:
@@ -1188,41 +1183,6 @@ The plan is a draft. Refine it with them before executing. They know things you 
 
 ## On Every Conversation Start
 
-**THIS IS MANDATORY.** Before responding to the user's FIRST message (even if it's just "hey" or a specific task), you MUST complete these steps IN ORDER. Do not skip any step. Do not jump into a task without loading context first.
-
-### 0. Load Full Context (BEFORE RESPONDING)
-
-**This step happens BEFORE you say anything to the user.**
-
-```bash
-# 1. Query memory for recent context
-node product/packages/memory/dist/cli.js context "recent work current phase" --limit 5 2>/dev/null || true
-
-# 2. Get recent work synopsis (journal + commits + headers)
-node product/packages/memory/dist/cli.js synopsis 24 2>/dev/null || cat .jfl/journal/*.jsonl 2>/dev/null | tail -10
-
-# 3. Pull pipeline (if CRM configured - auto-detects backend from .jfl/config.json)
-./crm list 2>/dev/null || echo "CRM not configured - run ./crm setup"
-
-# 4. Key knowledge files to scan:
-# - knowledge/VISION.md
-# - knowledge/ROADMAP.md
-# - knowledge/TASKS.md
-```
-
-**Why this matters:**
-- Memory is the hub - all context comes from memory queries
-- Journal captures decisions as they happen (not at session end)
-- Without pipeline, you miss active conversations that need follow-up
-- User expects you to "just know" the context - don't make them re-explain
-
-**What to extract:**
-- Recent decisions: What did we decide? (from journal)
-- Current focus: What's the priority? (from memory)
-- Pipeline: Any HOT/FOLLOW_UP items? Calls scheduled?
-- Tasks: What's the priority this week?
-- Ship date: How many days until launch?
-
 ### 1. Identify the User
 
 **Authentication is required for owner access.** Git config alone is NOT trusted.
@@ -1262,16 +1222,9 @@ This verifies your identity. Git config alone isn't enough for security.
 | **Contributor** | Has suggestions file | Route to suggestions |
 | **New** | No suggestions file | Onboard first |
 
-### 3. Show Status (via /hud)
+### 3. Show Status
 
-Run `/hud` to show the project dashboard. This displays:
-- Ship date countdown
-- Current phase
-- **Pipeline** (from ./crm list) - active conversations, follow-ups needed
-- This week's priorities
-- Suggested next action
-
-**The HUD is your greeting.** Don't just say "hey what do you want to work on?" - show the full picture and suggest what's next based on context.
+Run `/hud` to show the project dashboard.
 
 ---
 
@@ -1388,7 +1341,7 @@ Vision is blurry at the start and gets teased out through product development. B
 | 2 | GTM strategy docs | Who you're targeting and why |
 | 3 | `content/articles/` | How you explain it to the world |
 | 4 | `drafts/` | Active pitches to real people |
-| 5 | CRM notes | What resonates with real people |
+| 5 | CRM notes (`./crm prep [name]`) | What resonates with real people |
 | 6 | `knowledge/VISION.md` | Pointer doc + current synthesis |
 
 When someone asks "what is this?", read the living docs and synthesize. The vision crystallizes through building and selling, not through declaration.
@@ -1414,7 +1367,7 @@ When someone asks "what is this?", read the living docs and synthesize. The visi
 | Document | Purpose |
 |----------|---------|
 | `knowledge/TASKS.md` | Master task list |
-| `./crm` | Contact database (config-driven, see CRM Configuration section) |
+| `./crm` CLI | Contact database (Google Sheets) - **NEVER read a CRM.md file** |
 | `suggestions/{name}.md` | Per-person working space |
 
 ---
@@ -1558,7 +1511,7 @@ Set up strategic docs:
 Configure team:
 1. Edit Team section above with owner/team info
 2. Create `suggestions/{name}.md` for each contributor
-3. Set up CRM: `./crm setup` (choose backend: Google Sheets, Airtable, or markdown)
+3. Set up CRM via `./crm` CLI (syncs to Google Sheets)
 
 ### Phase 3: Brand
 
@@ -1703,3 +1656,105 @@ What's your name? I'll get you set up.
 3. **Capture naturally** - CRM updates through conversation
 4. **Context compounds** - Each session builds on the last
 5. **Ship it** - The goal is launch, not endless iteration
+
+---
+
+## INTERNAL: Template Distribution (JFL Team Only)
+
+**When you make changes that should reach ALL jfl users globally, update the template repo.**
+
+### Architecture
+
+```
+jfl-template (402goose/jfl-template)     ← SOURCE OF TRUTH
+    ↑
+    │ jfl init / jfl update pulls from here
+    │
+┌───┴────────────────────────────────────┐
+│ User's project                         │
+│ ├── CLAUDE.md                          │
+│ ├── .claude/settings.json              │
+│ ├── scripts/session/*.sh               │
+│ ├── knowledge/                         │
+│ └── ...                                │
+└────────────────────────────────────────┘
+```
+
+### When to Update jfl-template
+
+Update the template repo when changing:
+- `CLAUDE.md` - instructions for Claude
+- `.claude/settings.json` - hooks (SessionStart, Stop, etc.)
+- `scripts/session/*.sh` - session management scripts
+- `knowledge/*.md` - default knowledge templates
+- `templates/` - doc templates
+- `.claude/skills/` - bundled skills
+- `crm` - CRM CLI wrapper
+
+### How to Update
+
+**From JFL-GTM repo:**
+
+```bash
+# 1. Make changes in product/template/
+#    (This is the dev copy, test here first)
+
+# 2. Test the changes locally
+
+# 3. Copy to jfl-template repo
+cd /tmp
+rm -rf jfl-template
+git clone git@github.com:402goose/jfl-template.git
+cd jfl-template
+
+# 4. Copy updated files
+cp -r /path/to/JFL-GTM/product/template/* .
+cp -r /path/to/JFL-GTM/product/template/.[!.]* . 2>/dev/null || true
+
+# 5. Commit and push
+git add -A
+git commit -m "feat: description of what changed"
+git push origin main
+```
+
+**Or use this one-liner:**
+
+```bash
+# From JFL-GTM root:
+./scripts/sync-template.sh "commit message here"
+```
+
+### What Happens on User Side
+
+- **New users (`jfl init`)**: Get the latest template immediately
+- **Existing users (`jfl update`)**: Syncs these paths from template:
+  - `CLAUDE.md`
+  - `.claude/`
+  - `.mcp.json`
+  - `context-hub`
+  - `templates/`
+  - `scripts/`
+
+### Files NOT Synced on Update (preserved)
+
+These are project-specific and never overwritten:
+- `knowledge/` (their filled-in docs)
+- `product/` (their product code)
+- `suggestions/`
+- `content/`
+- `previews/`
+- `.jfl/config.json`
+
+### Testing Template Changes
+
+1. Make changes in `product/template/`
+2. Run `jfl init test-project` in /tmp to verify init works
+3. Create a project, run `jfl update` to verify update works
+4. If both work, sync to jfl-template repo
+
+### Remember
+
+- **jfl-template is lightweight** (~500KB) - only template files
+- **jfl-platform has code** (~50MB) - packages, scripts, etc.
+- Users should NEVER clone jfl-platform just for templates
+- Keep jfl-template in sync with product/template/
