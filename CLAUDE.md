@@ -34,11 +34,17 @@ Don't make users fill out forms before they can build. Let them start immediatel
 ./scripts/session/session-sync.sh
 ```
 
-**3. Run doctor check:**
+**3. Run doctor check (MUST ASK USER):**
 ```bash
 ./scripts/session/jfl-doctor.sh
 ```
-Note any warnings (orphaned worktrees, unmerged sessions, memory not initialized).
+
+**IMPORTANT: After running doctor, you MUST ask the user before continuing:**
+- If warnings/errors exist: "Doctor found issues: [list]. Want me to fix these?"
+- If clean: "Doctor check passed. Ready to continue?"
+
+**STOP AND WAIT for user response.** Do not proceed to step 4 until user responds.
+If they approve fixes, run `./scripts/session/jfl-doctor.sh --fix`.
 
 **4. Get unified context via MCP (REQUIRED):**
 ```
