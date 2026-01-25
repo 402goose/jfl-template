@@ -48,23 +48,6 @@ If you don't cd to the worktree:
    ```
    Should show `worktrees/session-*` path and `session-*` branch, NOT `main`
 
-4. **Get unified context via MCP (REQUIRED):**
-   ```
-   Call: mcp__jfl-context__context_get
-   ```
-
-   This single call returns:
-   - Recent journal entries (what happened across sessions)
-   - Knowledge docs (vision, roadmap, narrative, thesis)
-   - Code file headers (@purpose tags)
-
-   **DO NOT read individual markdown files.** The context MCP tool aggregates everything. This is why we built Context Hub.
-
-   If you need to search for something specific:
-   ```
-   Call: mcp__jfl-context__context_search with query="your search"
-   ```
-
 ### If You Missed the Output
 
 ```bash
@@ -1211,40 +1194,34 @@ The plan is a draft. Refine it with them before executing. They know things you 
 
 **This step happens BEFORE you say anything to the user.**
 
-**A. Get unified context via MCP (ONE CALL):**
-```
-Call: mcp__jfl-context__context_get
-Parameters: { "taskType": "general", "maxItems": 30 }
-```
-
-This returns EVERYTHING in one call:
-- Recent journal entries (what happened across sessions)
-- Knowledge docs (vision, roadmap, narrative, thesis, tasks)
-- Code file headers (@purpose tags)
-
-**DO NOT read individual markdown files.** The context MCP tool aggregates everything.
-
-**B. Pull CRM pipeline:**
 ```bash
-./crm list 2>/dev/null || echo "CRM not configured"
+# 1. Query memory for recent context
+node product/packages/memory/dist/cli.js context "recent work current phase" --limit 5 2>/dev/null || true
+
+# 2. Get recent work synopsis (journal + commits + headers)
+node product/packages/memory/dist/cli.js synopsis 24 2>/dev/null || cat .jfl/journal/*.jsonl 2>/dev/null | tail -10
+
+# 3. Pull pipeline (if CRM configured - auto-detects backend from .jfl/config.json)
+./crm list 2>/dev/null || echo "CRM not configured - run ./crm setup"
+
+# 4. Key knowledge files to scan:
+# - knowledge/VISION.md
+# - knowledge/ROADMAP.md
+# - knowledge/TASKS.md
 ```
 
 **Why this matters:**
-- Context Hub aggregates all sources in one call
+- Memory is the hub - all context comes from memory queries
 - Journal captures decisions as they happen (not at session end)
 - Without pipeline, you miss active conversations that need follow-up
 - User expects you to "just know" the context - don't make them re-explain
 
-**What to extract from context_get response:**
-- Journal section → recent decisions, what's in progress
-- Knowledge section → vision status, ship date from roadmap, current tasks
-- Code section → what files exist, their purposes
-
-**If you need to search for something specific:**
-```
-Call: mcp__jfl-context__context_search
-Parameters: { "query": "your search terms" }
-```
+**What to extract:**
+- Recent decisions: What did we decide? (from journal)
+- Current focus: What's the priority? (from memory)
+- Pipeline: Any HOT/FOLLOW_UP items? Calls scheduled?
+- Tasks: What's the priority this week?
+- Ship date: How many days until launch?
 
 ### 1. Identify the User
 

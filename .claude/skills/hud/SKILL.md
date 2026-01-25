@@ -25,23 +25,30 @@ If they're lost → ask "What are you building?" and go from there.
 
 ## Workflow
 
-### Step 1: Get Context via MCP Tools (ONE CALL)
+### Step 1: Read Context & Assess State
 
-**A. Get unified context:**
-```
-Call: mcp__jfl-context__context_get
-Parameters: { "taskType": "general", "maxItems": 30 }
-```
-
-This returns EVERYTHING in one call:
-- Recent journal entries (what happened across sessions)
-- Knowledge docs (vision, roadmap, narrative, thesis, tasks)
-- Code file headers (@purpose tags)
-
-**DO NOT read individual markdown files.** The context MCP tool aggregates everything.
-
-**B. Pull CRM pipeline:**
+**A. Query memory for recent context (FIRST):**
 ```bash
+# Memory is the hub - query it for what we were working on
+node product/packages/memory/dist/cli.js context "recent work current phase" --limit 5 2>/dev/null || true
+```
+
+**B. Read recent journal entries:**
+```bash
+# Journal is JSONL - use synopsis for human-readable output
+node product/packages/memory/dist/cli.js synopsis 24 2>/dev/null || cat .jfl/journal/*.jsonl 2>/dev/null | tail -10
+```
+
+Journal entries are structured JSON with fields:
+- `type`: feature/fix/decision/milestone/discovery
+- `title`, `summary`, `detail`: what happened
+- `files`: files affected
+- `decision`: decision slug for linking
+- `next`: what should happen next
+
+**C. Pull CRM pipeline (REQUIRED):**
+```bash
+# Get current pipeline from Google Sheets
 ./crm list
 ```
 
@@ -51,16 +58,17 @@ Look for these statuses that need attention:
 - 🔴 `HOT` - Urgent action needed
 - 📞 `CALL_SCHEDULED` - Prep needed
 
-**C. Assess state from context_get response:**
-- Journal section → recent work, decisions, what's in progress
-- Knowledge section → vision status (EMERGENT vs DECLARED), ship date from roadmap
-- Code section → what files exist, their purposes
+**D. Read knowledge files:**
+- `knowledge/VISION.md` - What you're building
+- `knowledge/ROADMAP.md` - Timeline and phases (get ship date!)
+- `knowledge/TASKS.md` - Current tasks
 
-**D. If you need to search for something specific:**
-```
-Call: mcp__jfl-context__context_search
-Parameters: { "query": "your search terms" }
-```
+**E. Assess state:**
+- Is there a launch date? Calculate days remaining
+- What phase are we in?
+- Any active CRM convos that need follow-up?
+- What decisions were made recently? (from journal)
+- What's the current focus? (from memory query)
 
 ### Step 2: Route Based on State
 
@@ -190,17 +198,7 @@ What do you want to tackle?
 - Works with minimal setup (just CLAUDE.md)
 - Better with `knowledge/` docs populated
 - User context from `suggestions/{name}.md`
-- **Context Hub MCP is the hub** - use `mcp__jfl-context__context_get` for unified context
-- Journal files at `.jfl/journal/<session-id>.jsonl`
-- CRM via `./crm` CLI (config-driven backend)
-
-## MCP Tools Available
-
-| Tool | Purpose |
-|------|---------|
-| `mcp__jfl-context__context_get` | Get unified context (journal + knowledge + code) |
-| `mcp__jfl-context__context_search` | Search across all context sources |
-| `mcp__jfl-context__context_status` | Check Context Hub status |
-| `mcp__jfl-context__context_sessions` | See activity from other sessions |
-| `mcp__jfl-memory__memory_search` | Semantic search in memory |
-| `mcp__jfl-memory__memory_add` | Add a memory directly |
+- **Memory is the hub** - all context comes from memory queries
+- Memory CLI at `product/packages/memory/dist/cli.js`
+- Journal at `.jfl/journal/<session>.jsonl` - decisions captured as they happen
+- No context.md file - memory replaces it
