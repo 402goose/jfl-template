@@ -167,6 +167,55 @@ This commits every 2 minutes to:
 
 **Start this at every session.** It's the only way to guarantee no work is lost.
 
+### Helper Scripts for Git Operations
+
+**⚠️ IMPORTANT: Use helper scripts to avoid context confusion**
+
+Working with nested repos (GTM + product submodule) can be confusing. Use these helpers:
+
+**1. Check your context first:**
+```bash
+./scripts/where-am-i.sh
+```
+Shows:
+- Current directory
+- Which repo (GTM or product submodule)
+- Current branch
+- Uncommitted changes
+
+**2. Commit to product submodule:**
+```bash
+./scripts/commit-product.sh "your commit message"
+```
+Handles:
+- cd to product/
+- Check if on a branch (fixes detached HEAD)
+- Stage, commit, push
+- Update parent repo reference
+- All in one command
+
+**3. Commit to GTM repo:**
+```bash
+./scripts/commit-gtm.sh "your commit message"
+```
+Handles:
+- Commits knowledge/, content/, suggestions/, etc.
+- Excludes product submodule
+- Stage, commit, push
+
+**When to use which:**
+- Editing product code (cli/, platform/, packages/) → `commit-product.sh`
+- Editing GTM docs (knowledge/, content/, CLAUDE.md) → `commit-gtm.sh`
+- Not sure? → Run `where-am-i.sh` first
+
+**Why these exist:**
+Prevents the confusion of:
+- "Am I in product or GTM?"
+- "Is this a submodule commit or parent commit?"
+- "Why is my HEAD detached?"
+
+Just use the helpers. They handle the routing.
+
 ---
 
 ## CRITICAL: Journal Protocol (NON-NEGOTIABLE)
