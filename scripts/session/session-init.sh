@@ -119,12 +119,21 @@ if [[ -d "$WORKTREES_DIR" ]]; then
         echo ""
         echo -e "${YELLOW}This work needs to be saved before continuing.${NC}"
         echo ""
-        echo "Options:"
-        echo "  1) Auto-commit all and continue (safest - no work lost)"
-        echo "  2) Show me the changes (for review)"
-        echo "  3) Skip for now (manual cleanup)"
-        echo ""
-        read -p "Choose [1-3]: " choice
+
+        # Check if running non-interactively (hook context)
+        if [[ ! -t 0 ]]; then
+            # Non-interactive - auto-commit (safest)
+            echo "Running non-interactively - auto-committing all changes..."
+            choice="1"
+        else
+            # Interactive - ask user
+            echo "Options:"
+            echo "  1) Auto-commit all and continue (safest - no work lost)"
+            echo "  2) Show me the changes (for review)"
+            echo "  3) Skip for now (manual cleanup)"
+            echo ""
+            read -p "Choose [1-3]: " choice
+        fi
 
         case "$choice" in
             1)
