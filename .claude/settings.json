@@ -65,7 +65,7 @@
           },
           {
             "type": "command",
-            "command": "jfl context-hub stop >> .jfl/logs/context-hub.log 2>&1; echo '✓ Context hub stopped'; exit 0"
+            "command": "mkdir -p .jfl/logs 2>/dev/null; jfl context-hub stop >> .jfl/logs/context-hub.log 2>&1; echo '✓ Context hub stopped'; exit 0"
           },
           {
             "type": "command",
