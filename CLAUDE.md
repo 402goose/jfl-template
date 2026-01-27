@@ -206,6 +206,97 @@ This commits every 2 minutes to:
 
 ---
 
+## Reference Management
+
+**Session sync automatically configures references with zero-duplication AND proactively checks for issues.**
+
+### How It Works
+
+During session sync:
+
+**1. Technical Setup (`setup-references.sh`)**
+- Detects if reference repos exist locally (e.g., `../jfl-platform`)
+- If yes: Configures git alternates → zero object duplication
+- If no: Uses GitHub clone → normal submodule
+
+**2. Natural Language Check (`check-references.sh`)**
+- Runs after technical setup
+- Proactively detects misconfigurations, missing repos, duplications
+- Asks permission before fixing anything
+- Remembers your preferences permanently
+- Detects when repos move or appear
+- Shows summary at end
+
+**You don't need to run anything manually** - this happens automatically at session start.
+
+### Reference Commands
+
+During sessions, use `./scripts/references.sh`:
+
+```bash
+./scripts/references.sh list              # Show all references
+./scripts/references.sh status            # Check running status
+./scripts/references.sh info <name>       # Detailed info
+./scripts/references.sh env <name> check  # Check env vars
+./scripts/references.sh start <name>      # Start reference
+./scripts/references.sh stop <name>       # Stop reference
+./scripts/references.sh health            # Health check all
+```
+
+### Configuration
+
+References are configured in `.jfl/references.json`:
+- Environment variables (required/optional)
+- Start/stop commands
+- Port mappings
+- Health checks
+
+### Natural Language Checks (Automatic)
+
+At session start, the checker proactively reports:
+
+```
+🔍 Checking references...
+
+📦 product
+   ✅ Linked to /Users/hath/code/jfl-platform
+   ✅ Zero duplication
+
+📦 cli
+   ⚠️  Found at /Users/hath/code/jfl-cli
+   Currently pulling from GitHub (objects duplicated)
+
+   💡 Linking would save ~200MB
+
+   Link to local copy? (y/n):
+```
+
+**Behavior:**
+- **Asks permission** before any changes
+- **Remembers preferences** permanently in `.jfl/references-preferences.json`
+- **Detects moves** - if a linked repo moves, asks for new location
+- **Detects new repos** - if a missing repo appears, offers to link
+- **Shows summary** after all checks complete
+
+### When to Use Manual Commands
+
+**Contextual suggestions:**
+- User mentions reference by name → offer to start if not running
+- Error mentions missing env var → suggest `env check`
+- Port conflict → check references for conflicts
+- User wants dependency → offer to add new reference
+
+**Do NOT auto-start services** - only start on demand or when user explicitly requests.
+
+Manual commands:
+```bash
+./scripts/references.sh status     # Shows configured/stopped/running
+./scripts/references.sh env product check  # Verify env vars
+./scripts/check-references.sh      # Re-run natural language check
+```
+
+---
+
 ## CRITICAL: Journal Protocol (NON-NEGOTIABLE)
 
 **⚠️ THIS IS MANDATORY. NOT OPTIONAL. NOT SKIPPABLE.**

@@ -7,6 +7,46 @@
 
 set -e
 
+# Stop background processes first
+echo "Stopping background processes..."
+
+# Stop auto-commit if running
+if [ -f ".jfl/auto-commit.pid" ]; then
+  PID=$(cat ".jfl/auto-commit.pid")
+  if kill -0 "$PID" 2>/dev/null; then
+    echo "  Stopping auto-commit (PID: $PID)..."
+    kill -TERM "$PID" 2>/dev/null || true
+    sleep 1
+    # Force kill if still running
+    kill -0 "$PID" 2>/dev/null && kill -9 "$PID" 2>/dev/null || true
+  fi
+  rm -f ".jfl/auto-commit.pid"
+fi
+
+# Stop auto-merge if running
+if [ -f ".auto-merge.pid" ]; then
+  PID=$(cat ".auto-merge.pid")
+  if kill -0 "$PID" 2>/dev/null; then
+    echo "  Stopping auto-merge (PID: $PID)..."
+    kill -TERM "$PID" 2>/dev/null || true
+    sleep 1
+    kill -0 "$PID" 2>/dev/null && kill -9 "$PID" 2>/dev/null || true
+  fi
+  rm -f ".auto-merge.pid"
+fi
+
+# Stop context-hub if running (already handled by Stop hook, but be defensive)
+if [ -f ".jfl/context-hub.pid" ]; then
+  PID=$(cat ".jfl/context-hub.pid")
+  if kill -0 "$PID" 2>/dev/null; then
+    echo "  Stopping context-hub (PID: $PID)..."
+    kill -TERM "$PID" 2>/dev/null || true
+    sleep 1
+    kill -0 "$PID" 2>/dev/null && kill -9 "$PID" 2>/dev/null || true
+  fi
+  rm -f ".jfl/context-hub.pid"
+fi
+
 # Get current session info
 BRANCH=$(git branch --show-current 2>/dev/null || echo "")
 if [ -z "$BRANCH" ]; then

@@ -154,6 +154,24 @@ echo "--- Syncing submodules ---"
 cd "$GTM_ROOT"
 git submodule update --init --recursive 2>/dev/null || true
 
+# Setup references with zero-duplication
+echo ""
+echo "--- Setting up references ---"
+if [ -f "$GTM_ROOT/scripts/setup-references.sh" ]; then
+    "$GTM_ROOT/scripts/setup-references.sh" || {
+        echo -e "${YELLOW}WARNING: Reference setup had issues${NC}"
+    }
+else
+    echo -e "${YELLOW}WARNING: setup-references.sh not found${NC}"
+fi
+
+# Natural language reference check (proactive, asks permission)
+if [ -f "$GTM_ROOT/scripts/check-references.sh" ]; then
+    "$GTM_ROOT/scripts/check-references.sh" || {
+        echo -e "${YELLOW}WARNING: Reference check encountered issues${NC}"
+    }
+fi
+
 # Final status
 echo ""
 echo "========================================"

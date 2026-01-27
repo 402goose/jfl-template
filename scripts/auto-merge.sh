@@ -9,8 +9,7 @@
 #   ./scripts/auto-merge.sh status SESSION_NAME  # Check merge status
 #   ./scripts/auto-merge.sh once SESSION_NAME    # Try merge once
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_FILE="$REPO_DIR/.auto-merge.log"
 INTERVAL=900  # 15 minutes
 MAX_CONSECUTIVE_FAILURES=3
@@ -94,73 +93,7 @@ do_merge() {
             return 0
         fi
     else
-        # Merge conflict! Try auto-resolution for template files
-        echo "$timestamp Merge conflict detected, attempting auto-resolution..." >> "$LOG_FILE"
-
-        # Get list of conflicting files
-        local conflicting=$(git diff --name-only --diff-filter=U 2>/dev/null)
-        local can_auto_resolve=true
-        local non_template_conflicts=""
-
-        # Check if all conflicts are in template files (safe to take session version)
-        # Template files: CLAUDE.md, .claude/, .mcp.json, scripts/, templates/
-        for file in $conflicting; do
-            case "$file" in
-                CLAUDE.md|.mcp.json)
-                    # Template file - take session version
-                    git checkout --theirs "$file" 2>/dev/null
-                    git add "$file" 2>/dev/null
-                    echo "$timestamp   Auto-resolved $file (took session version)" >> "$LOG_FILE"
-                    ;;
-                .claude/*|scripts/*|templates/*)
-                    # Template directory - take session version
-                    git checkout --theirs "$file" 2>/dev/null
-                    git add "$file" 2>/dev/null
-                    echo "$timestamp   Auto-resolved $file (took session version)" >> "$LOG_FILE"
-                    ;;
-                .jfl/journal/*)
-                    # Journal files - take session version (they're per-session anyway)
-                    git checkout --theirs "$file" 2>/dev/null
-                    git add "$file" 2>/dev/null
-                    echo "$timestamp   Auto-resolved $file (took session version)" >> "$LOG_FILE"
-                    ;;
-                knowledge/*|content/*|suggestions/*)
-                    # User content - cannot auto-resolve, needs manual review
-                    can_auto_resolve=false
-                    non_template_conflicts="$non_template_conflicts $file"
-                    ;;
-                *)
-                    # Unknown file type - be conservative, don't auto-resolve
-                    can_auto_resolve=false
-                    non_template_conflicts="$non_template_conflicts $file"
-                    ;;
-            esac
-        done
-
-        if $can_auto_resolve; then
-            # All conflicts were auto-resolved, complete the merge
-            if git commit --no-edit 2>> "$LOG_FILE"; then
-                echo "$timestamp ✓ Auto-resolved all conflicts and merged" >> "$LOG_FILE"
-
-                if git push 2>> "$LOG_FILE"; then
-                    echo "$timestamp ✓ Pushed auto-resolved merge" >> "$LOG_FILE"
-                    echo "auto-resolved" > "$STATUS_FILE"
-                    date '+%s' >> "$STATUS_FILE"
-                    echo "0" > "$FAILURE_COUNT_FILE"
-                    rm /tmp/merge-output-$$.txt 2>/dev/null
-                    git checkout "$current_branch" --quiet 2>/dev/null
-                    return 0
-                else
-                    echo "$timestamp ✓ Auto-resolved but push failed" >> "$LOG_FILE"
-                    echo "auto-resolved-unpushed" > "$STATUS_FILE"
-                    rm /tmp/merge-output-$$.txt 2>/dev/null
-                    git checkout "$current_branch" --quiet 2>/dev/null
-                    return 0
-                fi
-            fi
-        fi
-
-        # Could not auto-resolve all conflicts - abort and mark for manual resolution
+        # Merge conflict!
         git merge --abort 2>/dev/null
 
         # Increment failure count
@@ -172,10 +105,9 @@ do_merge() {
         echo "$failures" > "$FAILURE_COUNT_FILE"
 
         echo "$timestamp ✗ CONFLICT: $session vs main (attempt $failures)" >> "$LOG_FILE"
-        echo "$timestamp   Non-auto-resolvable conflicts:$non_template_conflicts" >> "$LOG_FILE"
 
-        # Get list of conflicting files (for display)
-        local conflicting_files=$(echo "$non_template_conflicts" | tr ' ' '\n' | grep -v '^$' | head -10)
+        # Get list of conflicting files
+        local conflicting_files=$(git diff --name-only main...$session 2>/dev/null | head -10)
 
         # Create conflict marker file
         cat > "$CONFLICT_FILE" <<EOF
@@ -224,13 +156,11 @@ start_daemon() {
     echo "0" > "$FAILURE_COUNT_FILE"
 
     # Run in background
-    # Close inherited file descriptors so parent doesn't wait for us
     (
-        exec </dev/null >/dev/null 2>&1
         while true; do
             # Check if conflict exists and max failures reached
             if [[ -f "$FAILURE_COUNT_FILE" ]]; then
-                failures=$(cat "$FAILURE_COUNT_FILE")
+                local failures=$(cat "$FAILURE_COUNT_FILE")
                 if [[ $failures -ge $MAX_CONSECUTIVE_FAILURES ]] && [[ -f "$CONFLICT_FILE" ]]; then
                     # Pause until conflict is resolved
                     sleep $INTERVAL

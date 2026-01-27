@@ -1,0 +1,86 @@
+{
+  "402_cat_rust": {
+    "path": "402_cat_rust",
+    "url": "git@github.com:hathbanger/402_cat.git",
+    "localPath": "/Users/andrewhathaway/code/oyl/402.cat/402_cat",
+    "description": "402.cat Rust implementation",
+    "env": {
+      "development": {
+        "required": [],
+        "optional": [],
+        "notes": "Check Cargo.toml for dependencies. Rust toolchain required."
+      }
+    },
+    "commands": {
+      "install": "cargo build",
+      "dev": "cargo run",
+      "test": "cargo test",
+      "build": "cargo build --release"
+    },
+    "ports": [],
+    "notes": "Rust project - ensure cargo is installed"
+  },
+  "platform": {
+    "path": "platform",
+    "url": "git@github.com:402goose/jfl-platform.git",
+    "localPath": "/Users/andrewhathaway/code/goose/jfl/jfl-platform",
+    "description": "JFL Platform - Main product codebase",
+    "env": {
+      "development": {
+        "required": [],
+        "optional": [],
+        "notes": "Check package.json for environment requirements"
+      }
+    },
+    "commands": {
+      "install": "npm install",
+      "dev": "npm run dev",
+      "build": "npm run build",
+      "test": "npm test"
+    },
+    "ports": [3000],
+    "healthcheck": "curl -s http://localhost:3000 > /dev/null && echo 'OK' || echo 'FAIL'"
+  },
+  "cli": {
+    "path": "cli",
+    "url": "git@github.com:402goose/jfl-cli.git",
+    "localPath": "/Users/andrewhathaway/code/goose/jfl/jfl-cli",
+    "description": "JFL CLI tool",
+    "env": {
+      "development": {
+        "required": [],
+        "optional": [],
+        "notes": "CLI tool configuration"
+      }
+    },
+    "commands": {
+      "install": "npm install",
+      "build": "npm run build",
+      "dev": "npm run dev",
+      "test": "npm test"
+    },
+    "ports": [],
+    "notes": "Command-line tool - no dev server"
+  },
+  "runner": {
+    "path": "runner",
+    "url": "git@github.com:hathbanger/jfl-runner.git",
+    "localPath": "/Users/andrewhathaway/code/goose/jfl/jfl-runner",
+    "description": "JFL Runner - Task execution engine",
+    "env": {
+      "development": {
+        "required": [],
+        "optional": [],
+        "notes": "Check package.json for configuration"
+      }
+    },
+    "commands": {
+      "install": "npm install",
+      "dev": "npm run dev",
+      "build": "npm run build",
+      "test": "npm test"
+    },
+    "ports": [],
+    "notes": "Backend runner service"
+  }
+}
