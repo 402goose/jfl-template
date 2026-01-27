@@ -31,20 +31,36 @@ Don't make users fill out forms before they can build. Let them start immediatel
 
 **2. Run session sync:**
 ```bash
-./product/scripts/session/session-sync.sh
+./scripts/session/session-sync.sh
 ```
 
-**3. Run doctor check (MUST ASK USER):**
+**3. Run doctor check (ONLY for existing projects):**
+
+**IMPORTANT: Skip doctor for fresh projects.** Detect fresh project:
 ```bash
-./product/scripts/session/jfl-doctor.sh
+# Fresh project indicators:
+# - No git commits yet: git rev-list --count HEAD returns 0 or error
+# - Empty knowledge docs: VISION.md has template text
+# - No journal entries: .jfl/journal/ is empty
+
+# Check if fresh
+COMMIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+if [[ "$COMMIT_COUNT" -gt "5" ]]; then
+    # Existing project - run doctor
+    ./scripts/session/jfl-doctor.sh
+    # Ask user before continuing
+    # If warnings: "Doctor found issues: [list]. Want me to fix these?"
+    # If clean: "Doctor check passed. Ready to continue?"
+    # STOP AND WAIT for user response
+    # If approved: ./scripts/session/jfl-doctor.sh --fix
+else
+    # Fresh project - skip doctor
+    echo "Fresh project detected, skipping doctor check."
+fi
 ```
 
-**IMPORTANT: After running doctor, you MUST ask the user before continuing:**
-- If warnings/errors exist: "Doctor found issues: [list]. Want me to fix these?"
-- If clean: "Doctor check passed. Ready to continue?"
-
-**STOP AND WAIT for user response.** Do not proceed to step 4 until user responds.
-If they approve fixes, run `./product/scripts/session/jfl-doctor.sh --fix`.
+**For existing projects:** After running doctor, you MUST ask the user before continuing.
+**For fresh projects:** Skip directly to step 4.
 
 **4. Get unified context via MCP (REQUIRED):**
 ```
@@ -55,6 +71,27 @@ This single call returns:
 - Recent journal entries (what happened across sessions)
 - Knowledge docs (vision, roadmap, narrative, thesis)
 - Code file headers (@purpose tags)
+
+**CRITICAL: Filter cross-project context pollution.**
+
+Context Hub may return results from OTHER projects on the machine. ALWAYS verify context matches the current project:
+
+1. Check the project path in journal entries
+2. If journal paths don't match current directory, IGNORE them
+3. If knowledge docs look like templates, this is a FRESH project
+4. For fresh projects: Skip context_get entirely, start foundation questions
+
+**Example of cross-project pollution (IGNORE THIS):**
+```
+Journal from: /Users/alectaggart/gatcha-toilet/.jfl/journal/...
+Current project: /Users/alectaggart/case
+→ THESE DON'T MATCH. Ignore the journal entry.
+```
+
+**For fresh projects (no commits, empty docs):**
+- Skip context_get
+- Skip doctor check
+- Go straight to foundation questions (VISION, ROADMAP, etc.)
 
 **DO NOT read individual markdown files.** The context MCP tool aggregates everything. This is why we built Context Hub.
 
@@ -126,7 +163,7 @@ The `product/` directory is a **symlink** to `../jfl-platform`. If jfl-platform 
 ### Verify Context is Intact
 
 ```bash
-./product/scripts/session/test-context-preservation.sh
+./scripts/session/test-context-preservation.sh
 ```
 
 This checks:
@@ -151,10 +188,10 @@ Hooks in `.claude/settings.json` automatically:
 
 ```bash
 # In a separate terminal, run:
-./product/scripts/session/auto-commit.sh start
+./scripts/session/auto-commit.sh start
 
 # Or with custom interval (default 120s):
-./product/scripts/session/auto-commit.sh start 60
+./scripts/session/auto-commit.sh start 60
 ```
 
 This commits every 2 minutes to:
@@ -166,55 +203,6 @@ This commits every 2 minutes to:
 - .jfl/
 
 **Start this at every session.** It's the only way to guarantee no work is lost.
-
-### Helper Scripts for Git Operations
-
-**⚠️ IMPORTANT: Use helper scripts to avoid context confusion**
-
-Working with nested repos (GTM + product submodule) can be confusing. Use these helpers:
-
-**1. Check your context first:**
-```bash
-./scripts/where-am-i.sh
-```
-Shows:
-- Current directory
-- Which repo (GTM or product submodule)
-- Current branch
-- Uncommitted changes
-
-**2. Commit to product submodule:**
-```bash
-./scripts/commit-product.sh "your commit message"
-```
-Handles:
-- cd to product/
-- Check if on a branch (fixes detached HEAD)
-- Stage, commit, push
-- Update parent repo reference
-- All in one command
-
-**3. Commit to GTM repo:**
-```bash
-./scripts/commit-gtm.sh "your commit message"
-```
-Handles:
-- Commits knowledge/, content/, suggestions/, etc.
-- Excludes product submodule
-- Stage, commit, push
-
-**When to use which:**
-- Editing product code (cli/, platform/, packages/) → `commit-product.sh`
-- Editing GTM docs (knowledge/, content/, CLAUDE.md) → `commit-gtm.sh`
-- Not sure? → Run `where-am-i.sh` first
-
-**Why these exist:**
-Prevents the confusion of:
-- "Am I in product or GTM?"
-- "Is this a submodule commit or parent commit?"
-- "Why is my HEAD detached?"
-
-Just use the helpers. They handle the routing.
 
 ---
 
@@ -1285,29 +1273,23 @@ Run `/hud` to show the project dashboard.
 
 ## Team Configuration
 
-**Team info is stored in `.jfl/config.json`** (not this file - this file gets overwritten by `jfl update`).
+> Edit this section with your team. **JFL auth identity must match to get access.**
 
-```json
-{
-  "team": {
-    "owner": { "name": "...", "github": "...", "x402": "..." },
-    "core": [{ "name": "...", "github": "...", "x402": "...", "role": "..." }],
-    "contributors": ["name1", "name2"]
-  }
-}
-```
+### Owner
+<!-- The person who can edit all files directly -->
+<!-- These identities get owner access when authenticated via jfl login -->
+**Name:** {owner_name}
+**GitHub Username:** {owner_github_username}
+**x402 Address:** {owner_wallet_address}
 
-**To update team:** Edit `.jfl/config.json` directly.
+### Core Team
+<!-- People with deeper access - must be authenticated -->
+| Name | GitHub Username | x402 Address | Role |
+|------|-----------------|--------------|------|
+| | | | |
 
-### Access Levels
-
-| Level | How to Check | Permissions |
-|-------|--------------|-------------|
-| **Owner** | `config.json → team.owner.github` matches auth | Full edit access |
-| **Core Team** | `config.json → team.core[].github` matches auth | Based on role |
-| **Contributor** | Has `suggestions/{name}.md` file | Route to suggestions |
-| **New** | No suggestions file | Onboard first |
-
+### Contributors
+<!-- Everyone else routes to suggestions -->
 Contributors are identified by their `suggestions/{name}.md` file.
 New authenticated users without a suggestions file get onboarded as contributors.
 
