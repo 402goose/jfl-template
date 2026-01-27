@@ -31,12 +31,12 @@ Don't make users fill out forms before they can build. Let them start immediatel
 
 **2. Run session sync:**
 ```bash
-./scripts/session/session-sync.sh
+./product/scripts/session/session-sync.sh
 ```
 
 **3. Run doctor check (MUST ASK USER):**
 ```bash
-./scripts/session/jfl-doctor.sh
+./product/scripts/session/jfl-doctor.sh
 ```
 
 **IMPORTANT: After running doctor, you MUST ask the user before continuing:**
@@ -44,7 +44,7 @@ Don't make users fill out forms before they can build. Let them start immediatel
 - If clean: "Doctor check passed. Ready to continue?"
 
 **STOP AND WAIT for user response.** Do not proceed to step 4 until user responds.
-If they approve fixes, run `./scripts/session/jfl-doctor.sh --fix`.
+If they approve fixes, run `./product/scripts/session/jfl-doctor.sh --fix`.
 
 **4. Get unified context via MCP (REQUIRED):**
 ```
@@ -126,7 +126,7 @@ The `product/` directory is a **symlink** to `../jfl-platform`. If jfl-platform 
 ### Verify Context is Intact
 
 ```bash
-./scripts/session/test-context-preservation.sh
+./product/scripts/session/test-context-preservation.sh
 ```
 
 This checks:
@@ -151,10 +151,10 @@ Hooks in `.claude/settings.json` automatically:
 
 ```bash
 # In a separate terminal, run:
-./scripts/session/auto-commit.sh start
+./product/scripts/session/auto-commit.sh start
 
 # Or with custom interval (default 120s):
-./scripts/session/auto-commit.sh start 60
+./product/scripts/session/auto-commit.sh start 60
 ```
 
 This commits every 2 minutes to:
@@ -1236,23 +1236,29 @@ Run `/hud` to show the project dashboard.
 
 ## Team Configuration
 
-> Edit this section with your team. **JFL auth identity must match to get access.**
+**Team info is stored in `.jfl/config.json`** (not this file - this file gets overwritten by `jfl update`).
 
-### Owner
-<!-- The person who can edit all files directly -->
-<!-- These identities get owner access when authenticated via jfl login -->
-**Name:** {owner_name}
-**GitHub Username:** {owner_github_username}
-**x402 Address:** {owner_wallet_address}
+```json
+{
+  "team": {
+    "owner": { "name": "...", "github": "...", "x402": "..." },
+    "core": [{ "name": "...", "github": "...", "x402": "...", "role": "..." }],
+    "contributors": ["name1", "name2"]
+  }
+}
+```
 
-### Core Team
-<!-- People with deeper access - must be authenticated -->
-| Name | GitHub Username | x402 Address | Role |
-|------|-----------------|--------------|------|
-| | | | |
+**To update team:** Edit `.jfl/config.json` directly.
 
-### Contributors
-<!-- Everyone else routes to suggestions -->
+### Access Levels
+
+| Level | How to Check | Permissions |
+|-------|--------------|-------------|
+| **Owner** | `config.json → team.owner.github` matches auth | Full edit access |
+| **Core Team** | `config.json → team.core[].github` matches auth | Based on role |
+| **Contributor** | Has `suggestions/{name}.md` file | Route to suggestions |
+| **New** | No suggestions file | Onboard first |
+
 Contributors are identified by their `suggestions/{name}.md` file.
 New authenticated users without a suggestions file get onboarded as contributors.
 

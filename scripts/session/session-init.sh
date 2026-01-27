@@ -26,13 +26,25 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # ==============================================================================
-# Step 1: Quick health check (warn only)
+# Step 0: Sync repos to latest (prevent context loss)
 # ==============================================================================
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  JFL Session Init"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Sync repos before creating worktree (ensures worktree is from latest main)
+if [[ -x "$SCRIPT_DIR/session-sync.sh" ]]; then
+    echo ""
+    "$SCRIPT_DIR/session-sync.sh" || {
+        echo -e "${YELLOW}⚠${NC}  Session sync failed, continuing with local state"
+    }
+fi
+
+# ==============================================================================
+# Step 1: Quick health check (warn only)
+# ==============================================================================
 
 # Count stale sessions (no PID or PID not running)
 stale_count=0
@@ -68,6 +80,114 @@ fi
 if [[ $stale_count -gt 5 ]]; then
     echo -e "${YELLOW}→${NC}  Cleaning up stale sessions (> 5)..."
     "$SCRIPT_DIR/jfl-doctor.sh" --fix 2>/dev/null | grep -E "^  (Cleaning|✓)" || true
+fi
+
+# ==============================================================================
+# Step 2.5: Crash Reconciliation - Check for uncommitted work in stale sessions
+# ==============================================================================
+
+if [[ -d "$WORKTREES_DIR" ]]; then
+    worktrees_with_changes=""
+    change_count=0
+
+    for worktree in "$WORKTREES_DIR"/session-*; do
+        if [[ -d "$worktree" ]]; then
+            # Check if worktree has uncommitted changes
+            cd "$worktree"
+            if [[ -n $(git status --porcelain 2>/dev/null) ]]; then
+                session_name=$(basename "$worktree")
+                worktrees_with_changes="$worktrees_with_changes $session_name"
+                change_count=$((change_count + 1))
+            fi
+            cd "$REPO_DIR"
+        fi
+    done
+
+    if [[ $change_count -gt 0 ]]; then
+        echo ""
+        echo -e "${RED}⚠${NC}  Found $change_count session(s) with uncommitted work"
+        echo ""
+
+        for session in $worktrees_with_changes; do
+            worktree_path="$WORKTREES_DIR/$session"
+            cd "$worktree_path"
+            files=$(git status --porcelain | wc -l | tr -d ' ')
+            echo "  • $session ($files files)"
+            cd "$REPO_DIR"
+        done
+
+        echo ""
+        echo -e "${YELLOW}This work needs to be saved before continuing.${NC}"
+        echo ""
+        echo "Options:"
+        echo "  1) Auto-commit all and continue (safest - no work lost)"
+        echo "  2) Show me the changes (for review)"
+        echo "  3) Skip for now (manual cleanup)"
+        echo ""
+        read -p "Choose [1-3]: " choice
+
+        case "$choice" in
+            1)
+                echo ""
+                echo -e "${CYAN}→${NC}  Auto-committing all changes..."
+                for session in $worktrees_with_changes; do
+                    worktree_path="$WORKTREES_DIR/$session"
+                    cd "$worktree_path"
+
+                    if [[ -n $(git status --porcelain 2>/dev/null) ]]; then
+                        # Critical paths
+                        git add knowledge/ previews/ content/ suggestions/ CLAUDE.md .jfl/ 2>/dev/null || true
+
+                        if git commit -m "crash recovery: auto-save uncommitted work from $session" 2>/dev/null; then
+                            echo -e "  ${GREEN}✓${NC} $session - committed and saved"
+                            git push origin "$(git branch --show-current)" 2>/dev/null || true
+                        fi
+                    fi
+
+                    cd "$REPO_DIR"
+                done
+                echo ""
+                echo -e "${GREEN}✓${NC} All changes saved. Continuing..."
+                ;;
+            2)
+                echo ""
+                for session in $worktrees_with_changes; do
+                    worktree_path="$WORKTREES_DIR/$session"
+                    echo "─────────────────────────────────────"
+                    echo "$session:"
+                    echo ""
+                    cd "$worktree_path"
+                    git status --short
+                    cd "$REPO_DIR"
+                    echo ""
+                done
+                echo "─────────────────────────────────────"
+                echo ""
+                read -p "Commit these changes? [y/N]: " commit_choice
+                if [[ "$commit_choice" =~ ^[Yy]$ ]]; then
+                    for session in $worktrees_with_changes; do
+                        worktree_path="$WORKTREES_DIR/$session"
+                        cd "$worktree_path"
+                        git add knowledge/ previews/ content/ suggestions/ CLAUDE.md .jfl/ 2>/dev/null || true
+                        git commit -m "crash recovery: manual save from $session" 2>/dev/null || true
+                        git push origin "$(git branch --show-current)" 2>/dev/null || true
+                        cd "$REPO_DIR"
+                    done
+                    echo -e "${GREEN}✓${NC} Changes committed"
+                fi
+                ;;
+            3)
+                echo ""
+                echo -e "${YELLOW}Skipping crash recovery.${NC}"
+                echo "You can manually handle these sessions later."
+                echo ""
+                ;;
+            *)
+                echo ""
+                echo -e "${RED}Invalid choice. Skipping.${NC}"
+                ;;
+        esac
+    fi
 fi
 
 # ==============================================================================

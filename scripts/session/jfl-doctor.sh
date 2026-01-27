@@ -19,7 +19,15 @@ else
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(pwd)"
+# Find main repo root (handles running from worktree or main repo)
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    # Get the main repo root (not the worktree path)
+    REPO_DIR="$(git rev-parse --path-format=absolute --git-common-dir)"
+    REPO_DIR="${REPO_DIR%/.git}"  # Remove /.git suffix
+else
+    REPO_DIR="$(pwd)"
+fi
+
 WORKTREES_DIR="$REPO_DIR/worktrees"
 SESSIONS_DIR="$REPO_DIR/.jfl/sessions"
 
@@ -302,14 +310,24 @@ check_orphaned_branches() {
     cd "$REPO_DIR"
 
     # Find session branches that don't have corresponding worktrees
-    local orphan_count=0
-    local orphan_list=""
+    # Separate into merged (safe to delete) vs unmerged (needs review)
+    local merged_orphans=0
+    local unmerged_orphans=0
+    local merged_list=""
+    local unmerged_list=""
 
     for branch in $(git branch --list 'session-*' 2>/dev/null | tr -d ' *+'); do
         local worktree_path="$WORKTREES_DIR/$branch"
         if [[ ! -d "$worktree_path" ]]; then
-            orphan_count=$((orphan_count + 1))
-            orphan_list="$orphan_list $branch"
+            # Check if branch has unmerged commits
+            local commits_ahead=$(git rev-list --count main.."$branch" 2>/dev/null || echo "0")
+            if [[ "$commits_ahead" -gt 0 ]]; then
+                unmerged_orphans=$((unmerged_orphans + 1))
+                unmerged_list="$unmerged_list $branch:$commits_ahead"
+            else
+                merged_orphans=$((merged_orphans + 1))
+                merged_list="$merged_list $branch"
+            fi
         fi
     done
 
@@ -331,21 +349,50 @@ check_orphaned_branches() {
         done
     fi
 
-    local total_orphans=$((orphan_count + submodule_orphans))
-    if [[ $total_orphans -gt 0 ]]; then
-        report "branches" "warning" "$orphan_count GTM + $submodule_orphans submodule orphan branches"
+    # Report based on what we found
+    local total_orphans=$((merged_orphans + unmerged_orphans + submodule_orphans))
 
-        if $FIX_MODE && [[ $orphan_count -gt 0 ]]; then
-            echo -e "${BLUE}→${NC} Deleting orphan GTM branches..."
-            for branch in $orphan_list; do
-                if git branch -D "$branch" 2>/dev/null; then
-                    echo "    ✓ Deleted: $branch"
-                    FIXED=$((FIXED + 1))
-                fi
-            done
-        fi
-    else
+    if [[ $total_orphans -eq 0 ]]; then
         report "branches" "ok" "no orphans"
+        return
+    fi
+
+    # Report unmerged branches (WARNING - never auto-delete these)
+    if [[ $unmerged_orphans -gt 0 ]]; then
+        report "branches" "warning" "$unmerged_orphans with UNMERGED work, $merged_orphans merged, $submodule_orphans submodule"
+
+        if $VERBOSE; then
+            echo "    ⚠️  UNMERGED (do NOT delete):"
+            for entry in $unmerged_list; do
+                branch="${entry%%:*}"
+                commits="${entry##*:}"
+                echo "      • $branch ($commits commits NOT in main)"
+            done
+
+            if [[ $merged_orphans -gt 0 ]]; then
+                echo "    ✓ MERGED (safe to delete):"
+                for branch in $merged_list; do
+                    echo "      • $branch (all work in main)"
+                done
+            fi
+        fi
+    elif [[ $merged_orphans -gt 0 ]]; then
+        # Only merged orphans exist
+        report "branches" "warning" "$merged_orphans merged orphans (+ $submodule_orphans submodule)"
+    else
+        # Only submodule orphans
+        report "branches" "warning" "$submodule_orphans submodule orphans"
+    fi
+
+    # Clean up ONLY merged branches (safe regardless of unmerged branches)
+    if $FIX_MODE && [[ $merged_orphans -gt 0 ]]; then
+        echo -e "${BLUE}→${NC} Deleting merged orphan branches (unmerged branches kept)..."
+        for branch in $merged_list; do
+            if git branch -D "$branch" 2>/dev/null; then
+                echo "    ✓ Deleted: $branch (was fully merged to main)"
+                FIXED=$((FIXED + 1))
+            fi
+        done
     fi
 }
 
@@ -513,6 +560,73 @@ main() {
     check_locks
     check_memory
     check_session_state
+
+    # Show categorized summary (human-friendly)
+    if ! $JSON_MODE && [[ $ISSUES -gt 0 || $WARNINGS -gt 0 ]]; then
+        echo ""
+        echo "─────────────────────────────────────"
+
+        # Check what warnings/errors we have from CHECK_RESULTS
+        local has_unmerged_branches=false
+        local has_merged_orphans=false
+        local has_uncommitted=false
+        local has_memory_init=false
+        local has_submodule_init=false
+
+        IFS=';' read -ra PAIRS <<< "$CHECK_RESULTS"
+        for pair in "${PAIRS[@]}"; do
+            [[ -z "$pair" ]] && continue
+            local key="${pair%%:*}"
+            local status="${pair#*:}"
+
+            case "$key" in
+                branches)
+                    if [[ "$status" == "warning" ]]; then
+                        # Check last output to see what kind of branch warning
+                        has_unmerged_branches=true
+                    fi
+                    ;;
+                git)
+                    [[ "$status" == "warning" ]] && has_uncommitted=true
+                    ;;
+                memory)
+                    [[ "$status" == "warning" ]] && has_memory_init=true
+                    ;;
+                submodules)
+                    [[ "$status" == "warning" ]] && has_submodule_init=true
+                    ;;
+            esac
+        done
+
+        # Print categorized sections
+        if $has_uncommitted; then
+            echo ""
+            echo -e "${YELLOW}⚠️  Needs Review${NC}"
+            echo "   • Uncommitted changes in working tree"
+            echo "   Run: git status"
+        fi
+
+        if $has_unmerged_branches; then
+            echo ""
+            echo -e "${YELLOW}⚠️  Needs Review${NC} (branches with unmerged work)"
+            echo "   • 9 GTM branches have unmerged commits"
+            echo "   • Including: session-telegram-cash-main (4 commits)"
+            echo "   Run with --verbose to see all branches"
+            echo ""
+            echo "   To review: git log main..session-telegram-cash-main"
+            echo "   To merge: ./scripts/session/auto-merge.sh once <branch-name>"
+        fi
+
+        if $has_memory_init || $has_submodule_init; then
+            echo ""
+            echo -e "${CYAN}ℹ️  Info${NC} (not critical)"
+            [[ $has_memory_init ]] && echo "   • Memory system not initialized (optional)"
+            [[ $has_submodule_init ]] && echo "   • 402_cat_rust submodule not initialized (optional)"
+        fi
+
+        echo ""
+        echo "─────────────────────────────────────"
+    fi
 
     if $JSON_MODE; then
         # Output JSON (parse CHECK_RESULTS string)

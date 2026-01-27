@@ -5,6 +5,15 @@
   "product_repo": "",
   "product_path": "product/",
   "description": "",
+  "team": {
+    "owner": {
+      "name": "",
+      "github": "",
+      "x402": ""
+    },
+    "core": [],
+    "contributors": []
+  },
   "crm": {
     "type": "",
     "config": {}

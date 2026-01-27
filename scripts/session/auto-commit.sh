@@ -142,6 +142,21 @@ commit_single_submodule() {
     fi
 }
 
+# Graceful shutdown handler - ensures final commit before exit
+graceful_shutdown() {
+    echo "[$(date '+%H:%M:%S')] Received shutdown signal - saving final changes..." >> "$LOG_FILE" 2>&1
+
+    # Run final commit to save any pending work
+    {
+        do_commit
+        commit_submodules_if_changes
+    } >> "$LOG_FILE" 2>&1
+
+    echo "[$(date '+%H:%M:%S')] Shutdown complete." >> "$LOG_FILE" 2>&1
+    rm -f "$PID_FILE"
+    exit 0
+}
+
 start_daemon() {
     if [[ -f "$PID_FILE" ]]; then
         local pid=$(cat "$PID_FILE")
@@ -154,10 +169,14 @@ start_daemon() {
 
     echo "Starting auto-commit daemon (interval: ${INTERVAL}s)..."
 
-    # Run in background (match original JFL pattern)
+    # Run in background with signal handling
     # Close inherited file descriptors so parent doesn't wait for us
     (
         exec </dev/null >/dev/null 2>&1
+
+        # Trap signals for graceful shutdown
+        trap graceful_shutdown SIGINT SIGTERM SIGQUIT
+
         while true; do
             {
                 echo "[$(date '+%H:%M:%S')] Checking for changes..."
@@ -179,8 +198,24 @@ stop_daemon() {
         local pid=$(cat "$PID_FILE")
         if kill -0 "$pid" 2>/dev/null; then
             echo "Stopping auto-commit (PID: $pid)..."
-            kill "$pid" 2>/dev/null
-            rm -f "$PID_FILE"
+
+            # Send SIGTERM for graceful shutdown (runs final commit)
+            kill -TERM "$pid" 2>/dev/null
+
+            # Wait up to 10 seconds for graceful shutdown
+            local wait_count=0
+            while kill -0 "$pid" 2>/dev/null && [ $wait_count -lt 20 ]; do
+                sleep 0.5
+                wait_count=$((wait_count + 1))
+            done
+
+            # If still running after timeout, force kill
+            if kill -0 "$pid" 2>/dev/null; then
+                echo "Graceful shutdown timed out, forcing..."
+                kill -9 "$pid" 2>/dev/null
+                rm -f "$PID_FILE"
+            fi
+
             echo "Stopped."
         else
             echo "Process not running (stale PID file)"
