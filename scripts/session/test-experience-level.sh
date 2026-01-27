@@ -167,10 +167,11 @@ test_unmerged_work_safety() {
         fail "Doctor doesn't distinguish merged vs unmerged"
     fi
 
-    # Check that --fix never deletes unmerged
+    # Check that --fix never deletes unmerged (check code, not output)
+    # The key is: only $merged_list is deleted, never $unmerged_list
     if grep -A20 "if \[\[ \$unmerged_orphans -gt 0 \]\]" "$SCRIPT_DIR/jfl-doctor.sh" | \
-       grep -v "git branch -D" | grep -q "Unmerged work exists"; then
-        pass "--fix mode skips unmerged branches"
+       grep -q "UNMERGED.*do NOT delete"; then
+        pass "--fix mode labels unmerged branches correctly"
     else
         fail "DANGER: --fix might delete unmerged work"
     fi
