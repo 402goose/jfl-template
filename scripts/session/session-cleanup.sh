@@ -64,6 +64,10 @@ fi
 if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "Auto-committing changes..."
   git add -A
+  # Unstage session metadata files that should never be committed
+  git reset HEAD .jfl/current-session-branch.txt 2>/dev/null || true
+  git reset HEAD .jfl/current-worktree.txt 2>/dev/null || true
+  git reset HEAD .jfl/worktree-path.txt 2>/dev/null || true
   git commit -m "session: end $(date +%Y-%m-%d\ %H:%M)" || true
 fi
 

@@ -1,472 +1,267 @@
 #!/usr/bin/env node
 
 /**
- * CRM CLI - 4-Table Structure
+ * CRM CLI - Config-driven CRM wrapper
  *
- * Tables: Companies, Contacts, Deals, Activities
+ * Reads CRM type from .jfl/config.json and routes to appropriate backend.
+ * Supports: google-sheets, airtable, markdown
  *
- * Usage:
- *   ./crm                           - Show insights dashboard
- *   ./crm stale                     - Show stale deals (5+ days)
- *   ./crm priority                  - Show high priority deals
- *   ./crm prep <contact>            - Prep for a call (show all context)
- *   ./crm touch <contact>           - Log an activity
- *   ./crm list [contacts|deals|companies]
- *   ./crm add contact "Name" "Company"
- *   ./crm add deal "Name" "Contact" "Pipeline"
- *   ./crm add activity "Contact" "Type" "Notes"
- *   ./crm update <contact> <field> <value>
- *   ./crm assign <contact> <owner>
+ * @purpose Route CRM commands to configured backend
  */
 
-import { google } from 'googleapis';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const SHEET_ID = process.env.CRM_SHEET_ID || '1f4mgUlE2JrNTlZ6g02uxsr2ctkdmMX_emehDBw88KHk';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-async function getAuth() {
-  const auth = new google.auth.GoogleAuth({
-    scopes: ['https://www.googleapis.com/auth/spreadsheets']
-  });
-  return auth;
-}
+// ============ CONFIG ============
 
-async function getSheets() {
-  const auth = await getAuth();
-  return google.sheets({ version: 'v4', auth });
-}
+function loadConfig() {
+  const configPath = path.join(process.cwd(), '.jfl/config.json');
 
-// ============ HELPERS ============
-
-function today() {
-  return new Date().toISOString().split('T')[0];
-}
-
-function daysSince(dateStr) {
-  if (!dateStr) return 999;
-  const date = new Date(dateStr);
-  const now = new Date();
-  return Math.floor((now - date) / (1000 * 60 * 60 * 24));
-}
-
-function stageIcon(stage) {
-  return {
-    'COLD': '⚪',
-    'RESEARCHING': '🔵',
-    'REACHED_OUT': '🟡',
-    'REPLIED': '🟡',
-    'IN_CONVO': '🟠',
-    'TALKING': '🟠',
-    'WARM': '🟢',
-    'COMMITTED': '✅',
-    'ACTIVE': '✅',
-    'CLOSED_WON': '✅',
-    'PASSED': '❌',
-    'CLOSED_LOST': '❌',
-    'CHURNED': '❌'
-  }[stage] || '⚪';
-}
-
-function priorityIcon(priority) {
-  return { 'High': '🔥', 'Medium': '🔸', 'Low': '⚪' }[priority] || '⚪';
-}
-
-// ============ DATA ACCESS ============
-
-async function getTable(name) {
-  const sheets = await getSheets();
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID,
-    range: `${name}!A:Z`,
-  });
-  const rows = res.data.values || [];
-  if (rows.length < 2) return [];
-
-  const headers = rows[0];
-  return rows.slice(1).map((row, idx) => {
-    const obj = { _row: idx + 2 };
-    headers.forEach((h, i) => {
-      obj[h] = row[i] || '';
-    });
-    return obj;
-  });
-}
-
-async function updateCell(sheet, row, col, value) {
-  const sheets = await getSheets();
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SHEET_ID,
-    range: `${sheet}!${col}${row}`,
-    valueInputOption: 'RAW',
-    resource: { values: [[value]] }
-  });
-}
-
-async function appendRow(sheet, values) {
-  const sheets = await getSheets();
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID,
-    range: `${sheet}!A:Z`,
-    valueInputOption: 'RAW',
-    resource: { values: [values] }
-  });
-}
-
-// ============ INSIGHTS ============
-
-async function showDashboard() {
-  const deals = await getTable('Deals');
-  const activities = await getTable('Activities');
-
-  console.log('\n═══════════════════════════════════════════════════════════════');
-  console.log('                        CRM DASHBOARD');
-  console.log('═══════════════════════════════════════════════════════════════\n');
-
-  // Stale (IN_CONVO or REACHED_OUT, 5+ days)
-  const stale = deals.filter(d =>
-    ['IN_CONVO', 'REACHED_OUT', 'TALKING', 'REPLIED'].includes(d.Stage) &&
-    daysSince(d.Updated) >= 5
-  );
-
-  if (stale.length > 0) {
-    console.log('⚠️  NEEDS FOLLOW-UP (' + stale.length + ')');
-    console.log('─────────────────────────────────────────');
-    stale.forEach(d => {
-      console.log(`  ${d.Contact} @ ${d.Company} - ${d.Stage} (${daysSince(d.Updated)} days)`);
-    });
-    console.log('');
+  if (!fs.existsSync(configPath)) {
+    return { crm: { type: '', config: {} } };
   }
 
-  // High priority not closed
-  const highPri = deals.filter(d =>
-    d.Priority === 'High' &&
-    !['COMMITTED', 'ACTIVE', 'CLOSED_WON', 'PASSED', 'CLOSED_LOST'].includes(d.Stage)
-  );
-
-  if (highPri.length > 0) {
-    console.log('🔥 HIGH PRIORITY (' + highPri.length + ')');
-    console.log('─────────────────────────────────────────');
-    highPri.forEach(d => {
-      console.log(`  ${d.Contact} @ ${d.Company} - ${d.Stage} [${d.Pipeline}]`);
-    });
-    console.log('');
+  try {
+    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch (e) {
+    console.error('Error reading .jfl/config.json:', e.message);
+    return { crm: { type: '', config: {} } };
   }
-
-  // Recent wins
-  const wins = deals.filter(d => ['COMMITTED', 'ACTIVE', 'CLOSED_WON'].includes(d.Stage));
-  console.log('✅ COMMITTED (' + wins.length + ')');
-  console.log('─────────────────────────────────────────');
-  wins.slice(0, 5).forEach(d => {
-    console.log(`  ${d.Contact} @ ${d.Company} - ${d.Deal}`);
-  });
-  console.log('');
-
-  // Pipeline summary
-  const pipelines = {};
-  deals.forEach(d => {
-    const p = d.Pipeline || 'Other';
-    pipelines[p] = pipelines[p] || { total: 0, stages: {} };
-    pipelines[p].total++;
-    pipelines[p].stages[d.Stage] = (pipelines[p].stages[d.Stage] || 0) + 1;
-  });
-
-  console.log('📊 PIPELINES');
-  console.log('─────────────────────────────────────────');
-  for (const [name, data] of Object.entries(pipelines)) {
-    const summary = Object.entries(data.stages)
-      .map(([s, c]) => `${stageIcon(s)} ${c}`)
-      .join(' ');
-    console.log(`  ${name}: ${data.total} deals - ${summary}`);
-  }
-  console.log('');
-
-  // Recent activity
-  const recentActivities = activities.slice(-5).reverse();
-  if (recentActivities.length > 0) {
-    console.log('📝 RECENT ACTIVITY');
-    console.log('─────────────────────────────────────────');
-    recentActivities.forEach(a => {
-      console.log(`  ${a.Date} | ${a.Type} | ${a.Contact} @ ${a.Company}`);
-    });
-    console.log('');
-  }
-
-  console.log('═══════════════════════════════════════════════════════════════\n');
 }
 
-async function showStale(days = 5) {
-  const deals = await getTable('Deals');
-  const stale = deals.filter(d =>
-    !['COLD', 'COMMITTED', 'ACTIVE', 'CLOSED_WON', 'PASSED', 'CLOSED_LOST'].includes(d.Stage) &&
-    daysSince(d.Updated) >= days
-  ).sort((a, b) => daysSince(b.Updated) - daysSince(a.Updated));
-
-  console.log(`\n⚠️  STALE DEALS (${days}+ days without activity)\n`);
-
-  if (stale.length === 0) {
-    console.log('  None! You\'re on top of things.\n');
-    return;
-  }
-
-  stale.forEach(d => {
-    const daysAgo = daysSince(d.Updated);
-    console.log(`  ${stageIcon(d.Stage)} ${d.Contact.padEnd(20)} @ ${d.Company.padEnd(15)} ${d.Stage.padEnd(12)} ${daysAgo} days`);
-    if (d['Next Action']) console.log(`     → Next: ${d['Next Action']}`);
-  });
-  console.log('');
+function saveConfig(config) {
+  const configPath = path.join(process.cwd(), '.jfl/config.json');
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
 }
 
-async function showPriority() {
-  const deals = await getTable('Deals');
+// ============ SETUP WIZARD ============
 
-  console.log('\n🔥 PRIORITY DEALS\n');
+async function setupWizard() {
+  const readline = await import('readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
 
-  ['High', 'Medium'].forEach(priority => {
-    const filtered = deals.filter(d =>
-      d.Priority === priority &&
-      !['COMMITTED', 'ACTIVE', 'CLOSED_WON', 'PASSED', 'CLOSED_LOST'].includes(d.Stage)
-    );
+  const question = (q) => new Promise(resolve => rl.question(q, resolve));
 
-    if (filtered.length > 0) {
-      console.log(`── ${priority.toUpperCase()} ──`);
-      filtered.forEach(d => {
-        console.log(`  ${stageIcon(d.Stage)} ${d.Contact} @ ${d.Company} - ${d.Stage} [${d.Owner || 'unassigned'}]`);
-      });
-      console.log('');
+  console.log(`
+╔══════════════════════════════════════════════════════════════╗
+║                      CRM SETUP                                ║
+╚══════════════════════════════════════════════════════════════╝
+
+Choose your CRM backend:
+
+  1. google-sheets  - Google Sheets (recommended)
+                      Full-featured, real-time sync, collaborative
+
+  2. airtable       - Airtable
+                      Rich field types, automations, views
+
+  3. markdown       - Markdown file
+                      Simple, no external dependencies
+                      Best for solo projects
+`);
+
+  const choice = await question('\nEnter choice (1/2/3): ');
+
+  const config = loadConfig();
+  config.crm = config.crm || { type: '', config: {} };
+
+  switch (choice.trim()) {
+    case '1':
+    case 'google-sheets':
+      config.crm.type = 'google-sheets';
+      console.log(`
+Google Sheets Setup:
+
+1. Create a new Google Sheet (or use existing)
+2. Copy the Sheet ID from the URL:
+   https://docs.google.com/spreadsheets/d/[THIS_IS_THE_ID]/edit
+
+3. Ensure you have Google Cloud credentials:
+   gcloud auth application-default login
+`);
+      const sheetId = await question('Enter Sheet ID: ');
+      if (sheetId.trim()) {
+        config.crm.config = { sheet_id: sheetId.trim() };
+        // Also set env var hint
+        console.log(`
+To use this sheet, either:
+  - Set in config (done) ✓
+  - Or set env var: export CRM_SHEET_ID="${sheetId.trim()}"
+`);
+      }
+      break;
+
+    case '2':
+    case 'airtable':
+      config.crm.type = 'airtable';
+      console.log(`
+Airtable Setup:
+
+1. Get your API key from https://airtable.com/account
+2. Get Base ID from https://airtable.com/api (select your base)
+`);
+      const apiKey = await question('Enter API Key (or press enter to use env var): ');
+      const baseId = await question('Enter Base ID: ');
+
+      config.crm.config = {
+        base_id: baseId.trim(),
+        api_key_env: 'AIRTABLE_API_KEY'
+      };
+
+      if (apiKey.trim()) {
+        console.log(`
+⚠️  Storing API key in config. For security, prefer using env var:
+    export AIRTABLE_API_KEY="${apiKey.trim()}"
+`);
+        config.crm.config.api_key = apiKey.trim();
+      }
+      break;
+
+    case '3':
+    case 'markdown':
+      config.crm.type = 'markdown';
+      config.crm.config = { path: 'knowledge/CRM.md' };
+      console.log(`
+Markdown CRM configured.
+
+Your CRM file is at: knowledge/CRM.md
+Edit it directly or use ./crm commands to manage contacts.
+`);
+      break;
+
+    default:
+      console.log('Invalid choice. Run ./crm setup again.');
+      rl.close();
+      return;
+  }
+
+  saveConfig(config);
+  console.log(`✓ CRM configured: ${config.crm.type}\n`);
+  rl.close();
+}
+
+// ============ MARKDOWN CRM ============
+
+function markdownCRM(args) {
+  const config = loadConfig();
+  const crmPath = config.crm?.config?.path || 'knowledge/CRM.md';
+  const fullPath = path.join(process.cwd(), crmPath);
+
+  if (!fs.existsSync(fullPath)) {
+    console.log(`CRM file not found: ${crmPath}`);
+    console.log('Creating from template...');
+
+    // Copy template
+    const templatePath = path.join(__dirname, 'templates/collaboration/CRM.md');
+    if (fs.existsSync(templatePath)) {
+      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+      fs.copyFileSync(templatePath, fullPath);
+      console.log(`✓ Created ${crmPath}`);
+    } else {
+      console.log('Template not found. Please create knowledge/CRM.md manually.');
+      return;
     }
-  });
+  }
+
+  const command = args[0];
+
+  switch (command) {
+    case 'list':
+      console.log(`\nCRM: ${crmPath}\n`);
+      console.log(fs.readFileSync(fullPath, 'utf8'));
+      break;
+
+    case 'edit':
+      console.log(`\nOpen ${crmPath} in your editor.\n`);
+      console.log('Markdown CRM is edited directly in the file.');
+      break;
+
+    default:
+      console.log(`
+Markdown CRM - Simple file-based contact management
+
+Commands:
+  ./crm list          Show CRM contents
+  ./crm edit          Instructions to edit CRM file
+
+For more features, consider switching to Google Sheets or Airtable:
+  ./crm setup
+`);
+  }
 }
 
-async function prepContact(query) {
-  const contacts = await getTable('Contacts');
-  const deals = await getTable('Deals');
-  const activities = await getTable('Activities');
-  const companies = await getTable('Companies');
+// ============ GOOGLE SHEETS CRM ============
 
-  const cleanQuery = query.replace('@', '').toLowerCase();
-  const contact = contacts.find(c =>
-    c.Name.toLowerCase().includes(cleanQuery) ||
-    (c.Handle || '').toLowerCase().includes(cleanQuery)
-  );
+async function googleSheetsCRM(args) {
+  const config = loadConfig();
+  const sheetId = config.crm?.config?.sheet_id || process.env.CRM_SHEET_ID;
 
-  if (!contact) {
-    console.log(`\nContact "${query}" not found.\n`);
+  if (!sheetId) {
+    console.log(`
+Google Sheets CRM not configured.
+
+To set up:
+  1. Run: ./crm setup
+  2. Or set env var: export CRM_SHEET_ID="your-sheet-id"
+`);
     return;
   }
 
-  const company = companies.find(c => c.Company === contact.Company);
-  const contactDeals = deals.filter(d => d.Contact.includes(contact.Name) || d.Company === contact.Company);
-  const contactActivities = activities.filter(a =>
-    a.Contact.includes(contact.Name) || a.Company === contact.Company
-  ).sort((a, b) => b.Date.localeCompare(a.Date));
+  // Set env var for the actual CRM script
+  process.env.CRM_SHEET_ID = sheetId;
 
-  console.log('\n═══════════════════════════════════════════════════════════════');
-  console.log(`  PREP: ${contact.Name}`);
-  console.log('═══════════════════════════════════════════════════════════════\n');
+  // Import and run the Google Sheets CRM
+  // For now, exec the existing crm script if it exists, or inline the logic
+  const gsCliPath = path.join(__dirname, 'scripts/crm-google-sheets.js');
 
-  console.log('👤 CONTACT');
-  console.log('─────────────────────────────────────────');
-  console.log(`  Name:     ${contact.Name}`);
-  console.log(`  Company:  ${contact.Company}`);
-  if (contact.Role) console.log(`  Role:     ${contact.Role}`);
-  if (contact.Handle) console.log(`  Handle:   ${contact.Handle}`);
-  if (contact.Email) console.log(`  Email:    ${contact.Email}`);
-  if (contact['Last Touch']) console.log(`  Last Touch: ${contact['Last Touch']} (${daysSince(contact['Last Touch'])} days ago)`);
-  if (contact.Notes) console.log(`  Notes:    ${contact.Notes}`);
-  console.log('');
-
-  if (company) {
-    console.log('🏢 COMPANY');
-    console.log('─────────────────────────────────────────');
-    console.log(`  ${company.Company}`);
-    if (company.Industry) console.log(`  Industry: ${company.Industry}`);
-    if (company.Website) console.log(`  Website:  ${company.Website}`);
-    if (company.Notes) console.log(`  Notes:    ${company.Notes}`);
+  if (fs.existsSync(gsCliPath)) {
+    // Dynamic import the Google Sheets CRM
+    const gsCRM = await import(gsCliPath);
+    if (gsCRM.main) {
+      await gsCRM.main(args);
+    }
+  } else {
+    // Fallback: use existing googleapis implementation
+    // This would be the full CRM code from the main repo
+    console.log('Google Sheets CRM handler not found.');
+    console.log('Expected: scripts/crm-google-sheets.js');
     console.log('');
+    console.log('For now, ensure CRM_SHEET_ID is set and use the original ./crm script.');
   }
-
-  if (contactDeals.length > 0) {
-    console.log('💼 DEALS');
-    console.log('─────────────────────────────────────────');
-    contactDeals.forEach(d => {
-      console.log(`  ${stageIcon(d.Stage)} ${d.Deal}`);
-      console.log(`     Pipeline: ${d.Pipeline} | Stage: ${d.Stage}`);
-      if (d['Next Action']) console.log(`     Next: ${d['Next Action']}`);
-      if (d.Notes) console.log(`     Notes: ${d.Notes}`);
-    });
-    console.log('');
-  }
-
-  if (contactActivities.length > 0) {
-    console.log('📝 ACTIVITY HISTORY');
-    console.log('─────────────────────────────────────────');
-    contactActivities.slice(0, 10).forEach(a => {
-      console.log(`  ${a.Date} | ${a.Type}`);
-      if (a.Notes) console.log(`     ${a.Notes}`);
-    });
-    console.log('');
-  }
-
-  console.log('═══════════════════════════════════════════════════════════════\n');
 }
 
-// ============ ACTIONS ============
+// ============ AIRTABLE CRM ============
 
-async function logActivity(contactQuery, type, notes) {
-  const contacts = await getTable('Contacts');
-  const deals = await getTable('Deals');
+async function airtableCRM(args) {
+  const config = loadConfig();
+  const baseId = config.crm?.config?.base_id;
+  const apiKey = config.crm?.config?.api_key || process.env.AIRTABLE_API_KEY;
 
-  const cleanQuery = contactQuery.replace('@', '').toLowerCase();
-  const contact = contacts.find(c =>
-    c.Name.toLowerCase().includes(cleanQuery) ||
-    (c.Handle || '').toLowerCase().includes(cleanQuery)
-  );
+  if (!baseId || !apiKey) {
+    console.log(`
+Airtable CRM not fully configured.
 
-  if (!contact) {
-    console.log(`\nContact "${contactQuery}" not found.\n`);
+To set up:
+  1. Run: ./crm setup
+  2. Or set env vars:
+     export AIRTABLE_API_KEY="your-api-key"
+     And configure base_id in .jfl/config.json
+`);
     return;
   }
 
-  // Find associated deal
-  const deal = deals.find(d => d.Contact.includes(contact.Name));
-
-  // Add activity
-  await appendRow('Activities', [
-    today(),
-    contact.Name,
-    contact.Company,
-    type,
-    notes || '',
-    deal ? deal.Deal : ''
-  ]);
-
-  // Update contact last touch
-  await updateCell('Contacts', contact._row, 'I', today());
-
-  // Update deal if exists
-  if (deal) {
-    await updateCell('Deals', deal._row, 'J', today()); // Updated
-    await updateCell('Deals', deal._row, 'M', '0');     // Days Stale = 0
-  }
-
-  console.log(`\n✓ Logged ${type} with ${contact.Name}`);
-  if (deal) console.log(`  Updated deal: ${deal.Deal}`);
+  // Airtable implementation would go here
+  // For MVP, show placeholder
+  console.log('Airtable CRM integration coming soon.');
+  console.log(`Base ID: ${baseId}`);
   console.log('');
-}
-
-async function assignDeal(contactQuery, owner) {
-  const deals = await getTable('Deals');
-
-  const cleanQuery = contactQuery.replace('@', '').toLowerCase();
-  const deal = deals.find(d =>
-    d.Contact.toLowerCase().includes(cleanQuery) ||
-    d.Company.toLowerCase().includes(cleanQuery)
-  );
-
-  if (!deal) {
-    console.log(`\nDeal for "${contactQuery}" not found.\n`);
-    return;
-  }
-
-  await updateCell('Deals', deal._row, 'L', owner);
-  console.log(`\n✓ Assigned ${deal.Deal} to ${owner}\n`);
-}
-
-async function updateDealStage(contactQuery, stage) {
-  const deals = await getTable('Deals');
-
-  const cleanQuery = contactQuery.replace('@', '').toLowerCase();
-  const deal = deals.find(d =>
-    d.Contact.toLowerCase().includes(cleanQuery) ||
-    d.Company.toLowerCase().includes(cleanQuery)
-  );
-
-  if (!deal) {
-    console.log(`\nDeal for "${contactQuery}" not found.\n`);
-    return;
-  }
-
-  // Update stage
-  await updateCell('Deals', deal._row, 'E', stage);
-  await updateCell('Deals', deal._row, 'J', today());
-  await updateCell('Deals', deal._row, 'M', '0');
-
-  // Update priority based on stage
-  let priority = 'Medium';
-  if (['COMMITTED', 'IN_CONVO', 'TALKING'].includes(stage)) priority = 'High';
-  if (stage === 'COLD') priority = 'Low';
-  await updateCell('Deals', deal._row, 'K', priority);
-
-  // Log activity
-  const contacts = await getTable('Contacts');
-  const contact = contacts.find(c => c.Name.includes(deal.Contact));
-
-  await appendRow('Activities', [
-    today(),
-    deal.Contact,
-    deal.Company,
-    'Stage Change',
-    `${deal.Stage} → ${stage}`,
-    deal.Deal
-  ]);
-
-  console.log(`\n✓ Updated ${deal.Contact} → ${stage}\n`);
-}
-
-async function addContact(name, company, handle, role) {
-  await appendRow('Contacts', [name, company, role || '', '', handle || '', '', '', today(), '']);
-  console.log(`\n✓ Added contact: ${name} @ ${company}\n`);
-}
-
-async function addDeal(name, contact, pipeline, stage = 'COLD') {
-  const contacts = await getTable('Contacts');
-  const c = contacts.find(x => x.Name.toLowerCase().includes(contact.toLowerCase()));
-  const company = c ? c.Company : '';
-
-  let priority = 'Medium';
-  if (['COMMITTED', 'IN_CONVO'].includes(stage)) priority = 'High';
-  if (stage === 'COLD') priority = 'Low';
-
-  await appendRow('Deals', [
-    name,
-    c ? c.Name : contact,
-    company,
-    pipeline,
-    stage,
-    '',
-    '',
-    '',
-    '',
-    today(),
-    priority,
-    'goose',
-    '0'
-  ]);
-  console.log(`\n✓ Added deal: ${name} [${pipeline}]\n`);
-}
-
-async function listTable(table) {
-  const data = await getTable(table);
-
-  console.log(`\n${table.toUpperCase()} (${data.length})\n`);
-
-  if (table === 'Contacts') {
-    data.forEach(c => {
-      console.log(`  ${c.Name.padEnd(25)} @ ${(c.Company || '').padEnd(15)} ${c.Handle || ''}`);
-    });
-  } else if (table === 'Deals') {
-    data.forEach(d => {
-      console.log(`  ${stageIcon(d.Stage)} ${d.Contact.padEnd(20)} ${d.Stage.padEnd(12)} [${d.Pipeline}]`);
-    });
-  } else if (table === 'Companies') {
-    data.forEach(c => {
-      console.log(`  ${c.Company.padEnd(25)} ${c.Industry || ''}`);
-    });
-  } else if (table === 'Activities') {
-    data.slice(-20).reverse().forEach(a => {
-      console.log(`  ${a.Date} | ${a.Type.padEnd(15)} | ${a.Contact} @ ${a.Company}`);
-    });
-  }
-  console.log('');
+  console.log('For now, manage your Airtable directly at https://airtable.com');
 }
 
 // ============ MAIN ============
@@ -475,128 +270,53 @@ async function main() {
   const args = process.argv.slice(2);
   const command = args[0];
 
-  if (!SHEET_ID) {
+  // Handle setup command regardless of config
+  if (command === 'setup') {
+    await setupWizard();
+    return;
+  }
+
+  // Load config and route to appropriate backend
+  const config = loadConfig();
+  const crmType = config.crm?.type;
+
+  // If no CRM type configured, check for env var fallback
+  if (!crmType) {
+    if (process.env.CRM_SHEET_ID) {
+      // Fallback to Google Sheets if env var is set
+      await googleSheetsCRM(args);
+      return;
+    }
+
     console.log(`
-Error: No Google Sheet configured.
+CRM not configured.
 
-To set up:
-1. Create a new Google Sheet (or use existing)
-2. Set the sheet ID: export CRM_SHEET_ID="your-sheet-id"
-3. Ensure Google Cloud credentials are configured
+Run: ./crm setup
+
+Or set environment variable for Google Sheets:
+  export CRM_SHEET_ID="your-sheet-id"
 `);
     return;
   }
 
-  if (!command) {
-    await showDashboard();
-    return;
-  }
+  // Route to configured backend
+  switch (crmType) {
+    case 'google-sheets':
+      await googleSheetsCRM(args);
+      break;
 
-  try {
-    switch (command) {
-      case 'stale':
-        await showStale(parseInt(args[1]) || 5);
-        break;
+    case 'airtable':
+      await airtableCRM(args);
+      break;
 
-      case 'priority':
-        await showPriority();
-        break;
+    case 'markdown':
+      markdownCRM(args);
+      break;
 
-      case 'prep':
-        if (!args[1]) {
-          console.log('\nUsage: ./crm prep <contact>\n');
-          return;
-        }
-        await prepContact(args[1]);
-        break;
-
-      case 'touch':
-      case 'log':
-        if (!args[1]) {
-          console.log('\nUsage: ./crm touch <contact> [type] [notes]\n');
-          console.log('Types: Call, Email, DM, Meeting, Note\n');
-          return;
-        }
-        await logActivity(args[1], args[2] || 'Note', args[3] || '');
-        break;
-
-      case 'assign':
-        if (!args[1] || !args[2]) {
-          console.log('\nUsage: ./crm assign <contact> <owner>\n');
-          return;
-        }
-        await assignDeal(args[1], args[2]);
-        break;
-
-      case 'update':
-      case 'move':
-        if (!args[1] || !args[2]) {
-          console.log('\nUsage: ./crm update <contact> <stage>\n');
-          console.log('Stages: COLD, REACHED_OUT, REPLIED, IN_CONVO, COMMITTED, PASSED\n');
-          return;
-        }
-        await updateDealStage(args[1], args[2]);
-        break;
-
-      case 'add':
-        const subCmd = args[1];
-        if (subCmd === 'contact') {
-          await addContact(args[2], args[3], args[4], args[5]);
-        } else if (subCmd === 'deal') {
-          await addDeal(args[2], args[3], args[4], args[5]);
-        } else {
-          console.log('\nUsage: ./crm add contact "Name" "Company" [@handle] [role]');
-          console.log('       ./crm add deal "Name" "Contact" "Pipeline" [stage]\n');
-        }
-        break;
-
-      case 'list':
-        const table = args[1] || 'Deals';
-        const validTables = ['Contacts', 'Deals', 'Companies', 'Activities'];
-        const match = validTables.find(t => t.toLowerCase().startsWith(table.toLowerCase()));
-        if (match) {
-          await listTable(match);
-        } else {
-          console.log(`\nUnknown table. Try: ${validTables.join(', ')}\n`);
-        }
-        break;
-
-      case 'help':
-        console.log(`
-CRM CLI - 4-Table Structure
-
-INSIGHTS:
-  ./crm                     Dashboard (default)
-  ./crm stale [days]        Show stale deals (default: 5 days)
-  ./crm priority            Show high priority deals
-  ./crm prep <contact>      Prep for a call (full context)
-
-ACTIONS:
-  ./crm touch <contact> [type] [notes]    Log activity (Call/Email/DM/Meeting/Note)
-  ./crm update <contact> <stage>          Update deal stage
-  ./crm assign <contact> <owner>          Assign deal to owner
-
-ADD:
-  ./crm add contact "Name" "Company" [@handle] [role]
-  ./crm add deal "Name" "Contact" "Pipeline" [stage]
-
-LIST:
-  ./crm list [contacts|deals|companies|activities]
-
-Stages: COLD → REACHED_OUT → REPLIED → IN_CONVO → COMMITTED (or PASSED)
-`);
-        break;
-
-      default:
-        // Try as contact lookup
-        await prepContact(command);
-    }
-  } catch (err) {
-    console.error('Error:', err.message);
-    if (err.message.includes('invalid_grant') || err.message.includes('credentials')) {
-      console.log('\nHint: Run `gcloud auth application-default login` to authenticate.');
-    }
+    default:
+      console.log(`Unknown CRM type: ${crmType}`);
+      console.log('Run: ./crm setup');
   }
 }
 
-main();
+main().catch(console.error);

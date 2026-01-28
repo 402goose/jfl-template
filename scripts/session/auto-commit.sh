@@ -30,8 +30,7 @@ CRITICAL_PATHS=(
     "content/"
     "suggestions/"
     "CLAUDE.md"
-    ".jfl/journal/"
-    ".jfl/config.json"
+    ".jfl/"
 )
 
 do_commit() {

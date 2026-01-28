@@ -57,7 +57,7 @@ do_merge() {
     fi
 
     # Pull latest main
-    if ! git pull --rebase --quiet 2>> "$LOG_FILE"; then
+    if ! git pull --no-rebase --quiet 2>> "$LOG_FILE"; then
         echo "$timestamp ✗ Failed to pull main" >> "$LOG_FILE"
         git checkout "$current_branch" --quiet 2>/dev/null
         return 1

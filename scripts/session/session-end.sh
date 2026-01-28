@@ -108,6 +108,10 @@ else
         echo ""
         echo -e "${BLUE}→${NC} Committing all changes..."
         git add -A
+        # Unstage session metadata files that should never be committed
+        git reset HEAD .jfl/current-session-branch.txt 2>/dev/null || true
+        git reset HEAD .jfl/current-worktree.txt 2>/dev/null || true
+        git reset HEAD .jfl/worktree-path.txt 2>/dev/null || true
 
         COMMIT_MSG="session: end $(date '+%Y-%m-%d %H:%M')"
 
