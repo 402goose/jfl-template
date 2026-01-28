@@ -88,7 +88,21 @@ if [ -z "$MAIN_REPO" ] || [ ! -d "$MAIN_REPO" ]; then
   fi
 fi
 
-# Try to merge to main using git --git-dir
+# Pre-merge cleanup: Remove files that will definitely conflict
+echo "Pre-merge cleanup..."
+git rm -f .jfl/current-session-branch.txt 2>/dev/null || true
+git rm -f .jfl/current-worktree.txt 2>/dev/null || true
+git rm -f .jfl/worktree-path.txt 2>/dev/null || true
+
+# Remove any git conflict artifacts from previous failed merges
+find .jfl -name "journal~*" -type f -delete 2>/dev/null || true
+
+# Commit cleanup if there are changes
+if ! git diff --quiet HEAD 2>/dev/null; then
+  git commit -m "cleanup: remove session metadata before merge" 2>/dev/null || true
+fi
+
+# Try to merge to main
 echo "Attempting to merge $BRANCH to main..."
 cd "$MAIN_REPO"
 
@@ -100,7 +114,10 @@ if ! git checkout main 2>/dev/null; then
 fi
 
 # Attempt merge with auto-resolve for .jfl/ conflicts
-if git merge --no-edit -X ours "$BRANCH" 2>&1; then
+MERGE_OUTPUT=$(git merge --no-edit -X ours "$BRANCH" 2>&1)
+MERGE_STATUS=$?
+
+if [ $MERGE_STATUS -eq 0 ]; then
   echo "✓ Merged $BRANCH to main"
 
   # Push to origin
@@ -120,9 +137,80 @@ if git merge --no-edit -X ours "$BRANCH" 2>&1; then
 
   echo "✓ Session cleanup complete - merged to main and pushed"
 else
-  echo "⚠ Merge conflicts detected, keeping branch $BRANCH"
-  echo "  Review later with: git log main..$BRANCH"
-  git merge --abort 2>/dev/null || true
+  # Merge failed - try auto-resolving common conflicts
+  echo "Initial merge failed, attempting auto-resolve..."
+
+  # Check what conflicts we have
+  CONFLICTS=$(git diff --name-only --diff-filter=U 2>/dev/null)
+
+  AUTO_RESOLVED=true
+  while IFS= read -r file; do
+    if [[ -z "$file" ]]; then
+      continue
+    fi
+
+    case "$file" in
+      .jfl/current-session-branch.txt|.jfl/current-worktree.txt|.jfl/worktree-path.txt)
+        # Session metadata - just remove it
+        echo "  Auto-resolving: $file (removing)"
+        git rm -f "$file" 2>/dev/null || true
+        ;;
+      .jfl/journal~*)
+        # Git conflict artifact - remove it
+        echo "  Auto-resolving: $file (removing artifact)"
+        git rm -f "$file" 2>/dev/null || true
+        ;;
+      product)
+        # Product directory conflict (likely symlink vs dir)
+        # Keep main's version (which should be platform symlink or nothing)
+        echo "  Auto-resolving: $file (keeping main's version)"
+        git checkout --ours "$file" 2>/dev/null || git rm -f "$file" 2>/dev/null || true
+        ;;
+      platform|cli|runner)
+        # Submodule conflicts - keep main's version
+        echo "  Auto-resolving: $file (keeping main's submodule state)"
+        git checkout --ours "$file" 2>/dev/null || true
+        ;;
+      *)
+        # Unknown conflict - can't auto-resolve
+        echo "  ⚠ Cannot auto-resolve: $file"
+        AUTO_RESOLVED=false
+        ;;
+    esac
+  done <<< "$CONFLICTS"
+
+  if [ "$AUTO_RESOLVED" = true ]; then
+    # All conflicts resolved, complete the merge
+    echo "All conflicts auto-resolved, completing merge..."
+    git add -A
+    git commit --no-edit 2>/dev/null || true
+
+    echo "✓ Merged $BRANCH to main (with auto-resolution)"
+
+    # Push to origin
+    git push origin main 2>/dev/null || echo "⚠ Push failed - run manually: git push origin main"
+
+    # Remove worktree
+    WORKTREE_PATH=$(git worktree list | grep "$BRANCH" | awk '{print $1}' | head -1)
+    if [ -n "$WORKTREE_PATH" ] && [ -d "$WORKTREE_PATH" ]; then
+      echo "Removing worktree at $WORKTREE_PATH..."
+      rm -rf "$WORKTREE_PATH" 2>/dev/null || true
+      git worktree prune 2>/dev/null || true
+    fi
+
+    # Delete the branch
+    echo "Deleting branch $BRANCH..."
+    git branch -D "$BRANCH" 2>/dev/null || true
+
+    echo "✓ Session cleanup complete - merged to main and pushed"
+  else
+    # Still have unresolved conflicts
+    echo "⚠ Merge conflicts remain, keeping branch $BRANCH"
+    echo "  Review later with: git log main..$BRANCH"
+    echo "  Conflicting files:"
+    git diff --name-only --diff-filter=U 2>/dev/null | sed 's/^/    - /'
+    git merge --abort 2>/dev/null || true
+  fi
 fi
 
 exit 0
