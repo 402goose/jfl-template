@@ -172,6 +172,21 @@ if [ -f "$GTM_ROOT/scripts/check-references.sh" ]; then
     }
 fi
 
+# Install git hooks
+echo ""
+echo "--- Installing git hooks ---"
+cd "$GTM_ROOT"
+if [ -f "scripts/hooks/pre-commit" ]; then
+    if [ ! -f ".git/hooks/pre-commit" ] || [ "scripts/hooks/pre-commit" -nt ".git/hooks/pre-commit" ]; then
+        ln -sf ../../scripts/hooks/pre-commit .git/hooks/pre-commit
+        echo -e "${GREEN}✓${NC} Installed pre-commit hook (prevents session metadata commits)"
+    else
+        echo -e "${GREEN}✓${NC} Pre-commit hook already installed"
+    fi
+else
+    echo -e "${YELLOW}⚠${NC}  Pre-commit hook template not found"
+fi
+
 # Final status
 echo ""
 echo "========================================"
