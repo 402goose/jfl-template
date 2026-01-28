@@ -30,7 +30,8 @@ CRITICAL_PATHS=(
     "content/"
     "suggestions/"
     "CLAUDE.md"
-    ".jfl/"
+    ".jfl/journal/"
+    ".jfl/config.json"
 )
 
 do_commit() {
@@ -180,11 +181,20 @@ start_daemon() {
     (
         exec </dev/null >/dev/null 2>&1
 
-        # Trap signals for graceful shutdown
-        trap graceful_shutdown SIGINT SIGTERM SIGQUIT
+        # Trap signals for graceful shutdown (added SIGHUP for terminal close)
+        trap graceful_shutdown SIGINT SIGTERM SIGQUIT SIGHUP
+
+        # Track parent process to detect when Claude dies
+        INITIAL_PPID=$PPID
 
         while true; do
             {
+                # Check if parent process (Claude) is still alive
+                if ! kill -0 "$INITIAL_PPID" 2>/dev/null; then
+                    echo "[$(date '+%H:%M:%S')] Parent process died (PPID $INITIAL_PPID) - running cleanup..."
+                    graceful_shutdown
+                fi
+
                 echo "[$(date '+%H:%M:%S')] Checking for changes..."
                 do_commit
                 commit_submodules_if_changes

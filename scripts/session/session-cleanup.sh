@@ -63,25 +63,48 @@ fi
 # Auto-commit any uncommitted changes first
 if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "Auto-committing changes..."
-  git add -A
-  # Unstage session metadata files that should never be committed
-  git reset HEAD .jfl/current-session-branch.txt 2>/dev/null || true
-  git reset HEAD .jfl/current-worktree.txt 2>/dev/null || true
-  git reset HEAD .jfl/worktree-path.txt 2>/dev/null || true
-  git commit -m "session: end $(date +%Y-%m-%d\ %H:%M)" || true
+
+  # Check if last commit is already "session: end" (make idempotent)
+  LAST_MSG=$(git log -1 --pretty=%s 2>/dev/null || echo "")
+  if [[ "$LAST_MSG" =~ ^session:\ end ]]; then
+    echo "Last commit already is 'session: end', skipping duplicate commit"
+  else
+    git add -A
+    # Unstage session metadata files that should never be committed
+    git reset HEAD .jfl/current-session-branch.txt 2>/dev/null || true
+    git reset HEAD .jfl/current-worktree.txt 2>/dev/null || true
+    git reset HEAD .jfl/worktree-path.txt 2>/dev/null || true
+    git commit -m "session: end $(date +%Y-%m-%d\ %H:%M)" || true
+  fi
 fi
 
-# Try to merge to main
+# Detect main repo location (we're in a worktree)
+MAIN_REPO=$(git rev-parse --git-common-dir 2>/dev/null | sed 's|/\.git$||')
+if [ -z "$MAIN_REPO" ] || [ ! -d "$MAIN_REPO" ]; then
+  # Fallback: find parent directory
+  MAIN_REPO=$(git worktree list | grep "(bare)" | awk '{print $1}' | head -1)
+  if [ -z "$MAIN_REPO" ]; then
+    MAIN_REPO=$(git worktree list | head -1 | awk '{print $1}')
+  fi
+fi
+
+# Try to merge to main using git --git-dir
 echo "Attempting to merge $BRANCH to main..."
-git checkout main 2>/dev/null || {
-  echo "Could not checkout main, skipping merge"
-  git checkout "$BRANCH" 2>/dev/null
+cd "$MAIN_REPO"
+
+# Checkout main in the main repo
+if ! git checkout main 2>/dev/null; then
+  echo "⚠ Could not checkout main, skipping merge"
+  echo "  Session branch $BRANCH preserved for manual merge"
   exit 0
-}
+fi
 
 # Attempt merge with auto-resolve for .jfl/ conflicts
 if git merge --no-edit -X ours "$BRANCH" 2>&1; then
   echo "✓ Merged $BRANCH to main"
+
+  # Push to origin
+  git push origin main 2>/dev/null || echo "⚠ Push failed - run manually: git push origin main"
 
   # Remove worktree if it exists
   WORKTREE_PATH=$(git worktree list | grep "$BRANCH" | awk '{print $1}' | head -1)
@@ -95,12 +118,11 @@ if git merge --no-edit -X ours "$BRANCH" 2>&1; then
   echo "Deleting branch $BRANCH..."
   git branch -D "$BRANCH" 2>/dev/null || true
 
-  echo "✓ Session cleanup complete"
+  echo "✓ Session cleanup complete - merged to main and pushed"
 else
   echo "⚠ Merge conflicts detected, keeping branch $BRANCH"
   echo "  Review later with: git log main..$BRANCH"
   git merge --abort 2>/dev/null || true
-  git checkout "$BRANCH" 2>/dev/null || true
 fi
 
 exit 0
