@@ -1,0 +1,36 @@
+# JFL Project .gitignore
+
+# Session metadata (local only)
+.jfl/current-session-branch.txt
+.jfl/current-worktree.txt
+.jfl/worktree-path.txt
+.jfl/logs/
+.jfl/*.pid
+
+# Worktrees (deprecated - for migration only)
+worktrees/
+
+# Memory database
+.jfl/memory.db*
+
+# Context hub
+.jfl/context-hub.pid
+
+# Node modules
+node_modules/
+dist/
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
