@@ -5,11 +5,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if git rev-parse --git-dir > /dev/null 2>&1 && [ -f ./scripts/session/session-init.sh ]; then ./scripts/session/session-init.sh; fi"
+            "command": "./scripts/session/session-init.sh"
           },
           {
             "type": "command",
-            "command": "if [ -f .jfl/logs/context-hub.log ]; then jfl context-hub ensure >> .jfl/logs/context-hub.log 2>&1 &; fi",
+            "command": "jfl context-hub ensure >> .jfl/logs/context-hub.log 2>&1 &",
             "async": true
           }
         ]
