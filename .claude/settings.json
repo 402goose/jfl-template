@@ -67,10 +67,6 @@
           },
           {
             "type": "command",
-            "command": "jfl context-hub stop >> .jfl/logs/context-hub.log 2>&1; echo '✓ Context hub stopped'; exit 0"
-          },
-          {
-            "type": "command",
             "command": "./scripts/session/session-cleanup.sh >> .jfl/logs/session-cleanup.log 2>&1 || echo 'Cleanup skipped'; exit 0"
           }
         ]

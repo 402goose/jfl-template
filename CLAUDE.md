@@ -175,6 +175,13 @@ Hooks in `.claude/settings.json` automatically:
 - Commit changes on Stop/PreCompact
 - Push to origin
 
+
+**⚠️  Important: Hooks cannot block operations**
+- Hooks end with `exit 0` so Claude Code always proceeds
+- They can warn, but cannot prevent session end or context compaction
+- **PreCompact hook auto-commits** before compaction to preserve work
+- **Stop hook warns** if no journal entry exists
+- These are safety nets, not guarantees - write journal entries as you work
 ### Continuous Auto-Commit (RECOMMENDED)
 
 **Problem:** Stop/PreCompact hooks only run if session ends cleanly. If session crashes, terminal closes, or you switch away → files can be lost.
@@ -205,7 +212,7 @@ This commits every 2 minutes to:
 
 **⚠️ THIS IS MANDATORY. NOT OPTIONAL. NOT SKIPPABLE.**
 
-You MUST write journal entries. The Stop hook will block session end if no journal entry exists.
+You MUST write journal entries. The Stop hook will warn if no journal entry exists (but cannot block the session end).
 
 **Write DETAILED journal entries as you work. Not titles — actual content.**
 
@@ -213,9 +220,9 @@ The journal is the handoff document between sessions and between people. When so
 
 ### Enforcement
 
-Hooks enforce this automatically:
-- **Stop hook** → Blocks session end if no journal entry for this session
-- **PreCompact hook** → Checks for journal entry before context compaction
+Hooks provide warnings automatically:
+- **Stop hook** → Warns if no journal entry for this session (cannot block)
+- **PreCompact hook** → Warns about missing journal + auto-commits changes (cannot block compaction)
 - **PostToolUse (Write/Edit)** → Checks for @purpose header on code files
 
 If you see "STOP - JOURNAL ENTRY REQUIRED", you MUST write a journal entry before proceeding.
