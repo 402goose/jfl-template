@@ -6,7 +6,7 @@ Starter template for new JFL GTM workspaces. Used by `jfl init` to scaffold new 
 
 This repo is the canonical template that gets cloned when running `jfl init -n my-project`. It includes:
 
-- Pre-configured `.claude/settings.json` with session hooks (SessionStart, Stop, PreCompact)
+- Pre-configured `.claude/settings.json` with session hooks (SessionStart, PostToolUse, UserPromptSubmit, Stop, PreCompact)
 - `.mcp.json` for Context Hub MCP server integration
 - Knowledge doc templates (`knowledge/VISION.md`, `NARRATIVE.md`, `THESIS.md`, `ROADMAP.md`, etc.)
 - Brand doc templates (`BRAND_BRIEF.md`, `BRAND_DECISIONS.md`, `VOICE_AND_TONE.md`)
@@ -21,10 +21,13 @@ This repo is the canonical template that gets cloned when running `jfl init -n m
 jfl-template/
 ├── .claude/
 │   ├── settings.json          # Claude Code hooks
-│   ├── agents/                # Service agent definitions
+│   ├── service-settings.json  # Lighter-weight hooks for service agents
+│   ├── agents/                # Service agent definitions (scaffolded empty)
 │   └── skills/                # Pre-installed slash commands
 ├── .jfl/
-│   └── config.json            # Project configuration
+│   ├── config.json            # Project configuration
+│   ├── journal/               # Session journal entries
+│   └── logs/                  # Session logs
 ├── .mcp.json                  # Context Hub MCP config
 ├── CLAUDE.md                  # AI instructions (main artifact)
 ├── knowledge/                 # Strategy docs (templates)
@@ -35,8 +38,12 @@ jfl-template/
 │   ├── BRAND_BRIEF.md
 │   ├── BRAND_DECISIONS.md
 │   ├── VOICE_AND_TONE.md
-│   └── TASKS.md
+│   ├── SERVICE_SPEC.md
+│   ├── ARCHITECTURE.md
+│   ├── DEPLOYMENT.md
+│   └── RUNBOOK.md
 ├── content/                   # Generated marketing content
+├── journal/                   # Journal entries (non-session use)
 ├── previews/                  # Asset previews
 ├── suggestions/               # Per-contributor workspaces
 ├── scripts/

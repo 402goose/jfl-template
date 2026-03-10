@@ -60,14 +60,19 @@ jfl-template is the starter template repository that `jfl init` clones to bootst
 | `scripts/session/auto-commit.sh` | Background daemon committing critical paths every 2 minutes |
 | `scripts/session/jfl-doctor.sh` | Health checker: git status, submodules, stale sessions, orphaned branches, locks, memory |
 | `scripts/session/test-context-preservation.sh` | Verify knowledge files, product specs, and git sync status |
-| `scripts/session/migrate-to-branch-sessions.sh` | Migration tool: worktree-based sessions to branch-based sessions |
+| `scripts/session/session-end.sh` | Session end workflow (commit, merge, cleanup) |
+| `scripts/session/test-critical-infrastructure.sh` | Test critical infrastructure components |
+| `scripts/session/test-experience-level.sh` | Test experience level detection |
+| `scripts/session/test-session-cleanup.sh` | Test session cleanup procedures |
+| `scripts/session/test-session-sync.sh` | Test session sync functionality |
+| `scripts/migrate-to-branch-sessions.sh` | Migration tool: worktree-based sessions to branch-based sessions |
 | `scripts/commit-gtm.sh` | Commit changes to the GTM repo (excludes submodules) |
 | `scripts/commit-product.sh` | Commit changes to the product submodule and update parent reference |
 | `scripts/where-am-i.sh` | Show current directory context, branch, and uncommitted changes |
 
 ### Skills (in `.claude/skills/`)
 
-17 bundled skills:
+18 bundled skills:
 - `agent-browser` - Browser automation
 - `brand-architect` - Brand identity creation workflow
 - `campaign-hud` - Campaign overview
@@ -83,6 +88,7 @@ jfl-template is the starter template repository that `jfl init` clones to bootst
 - `search` - Search functionality
 - `spec` - Specification writing
 - `startup` - Startup guidance
+- `viz` - Terminal data visualization via kuva
 - `web-architect` - Web asset implementation
 - `x-algorithm` - X/Twitter algorithm optimization
 
